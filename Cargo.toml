@@ -1,0 +1,9 @@
+[package]
+name = "sfota"
+version = "0.1.0"
+authors = ["Tim Evers <29369097+TVerse@users.noreply.github.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
