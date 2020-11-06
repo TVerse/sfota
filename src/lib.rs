@@ -32,8 +32,8 @@ mod tests {
 
     #[test]
     fn basic_assemble() {
-        let input = "  STA #$0300\n  RTS\n";
+        let input = "  STZ #$0300\n  RTS\n";
         let result = assemble(input);
-        assert_eq!(vec![0x8D, 0x00, 0x03, 0x60], result)
+        assert_eq!(vec![0x9C, 0x00, 0x03, 0x60], result)
     }
 }
