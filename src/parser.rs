@@ -7,27 +7,9 @@ use nom::multi::many0;
 use nom::sequence::{delimited, preceded, tuple};
 use nom::IResult;
 
-#[derive(Debug, Eq, PartialEq)]
-pub struct Parsed<'a>(Vec<Line<'a>>);
+use super::*;
 
-#[derive(Debug, Eq, PartialEq)]
-struct Line<'a>(Vec<Element<'a>>);
-
-#[derive(Debug, Eq, PartialEq)]
-enum Element<'a> {
-    Instruction(Mnemonic<'a>, Operand<'a>),
-}
-
-#[derive(Debug, Eq, PartialEq)]
-struct Mnemonic<'a>(&'a str);
-
-#[derive(Debug, Eq, PartialEq)]
-enum Operand<'a> {
-    AbsoluteFour(&'a str),
-    Implied,
-}
-
-pub fn parse<'a, E: ParseError<&'a str>>(i: &'a str) -> IResult<&'a str, Parsed, E> {
+pub(crate) fn parse<'a, E: ParseError<&'a str>>(i: &'a str) -> IResult<&'a str, Parsed, E> {
     map(all_consuming(many0(line)), Parsed)(i)
 }
 
@@ -214,11 +196,25 @@ mod tests {
                     )]),
                     Line(vec![Element::Instruction(
                         Mnemonic("RTS"),
-                        Operand::Implied
+                        Operand::Implied,
                     )]),
                 ])
             )),
             result
         )
+    }
+
+    #[test]
+    fn parse_fail_1() {
+        let input = "  STA #$0300\n  RTS\n ";
+        let result = parse::<E>(input);
+        assert_eq!(err(" ", ErrorKind::Eof), result)
+    }
+
+    #[test]
+    fn parse_fail_2() {
+        let input = "  STA #$0300\n  RTS";
+        let result = parse::<E>(input);
+        assert_eq!(err("  RTS", ErrorKind::Eof), result)
     }
 }
