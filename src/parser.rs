@@ -6,6 +6,7 @@ use nom::error::ParseError;
 use nom::multi::many0;
 use nom::sequence::{delimited, preceded, tuple};
 use nom::IResult;
+use std::str::FromStr;
 
 use super::*;
 
@@ -13,7 +14,7 @@ pub(crate) fn parse<'a, E: ParseError<&'a str>>(i: &'a str) -> IResult<&'a str, 
     map(all_consuming(many0(line)), Parsed)(i)
 }
 
-fn line<'a, E: ParseError<&'a str>>(i: &'a str) -> IResult<&'a str, Line<'a>, E> {
+fn line<'a, E: ParseError<&'a str>>(i: &'a str) -> IResult<&'a str, Line, E> {
     map(delimited(space1, instruction, newline), |e| Line(vec![e]))(i)
 }
 
@@ -29,18 +30,23 @@ fn valid_word<'a, E: ParseError<&'a str>>(i: &'a str) -> IResult<&'a str, &'a st
     recognize(tuple((valid_start, valid_end)))(i)
 }
 
-fn mnemonic<'a, E: ParseError<&'a str>>(i: &'a str) -> IResult<&'a str, Mnemonic<'a>, E> {
-    map(valid_word, Mnemonic)(i)
+fn mnemonic<'a, E: ParseError<&'a str>>(i: &'a str) -> IResult<&'a str, Mnemonic, E> {
+    // TODO unwrap is safe as long as the default is set. Maybe implement custom error?
+    map(valid_word, |s| Mnemonic::from_str(s).unwrap())(i)
 }
 
-fn operand<'a, E: ParseError<&'a str>>(i: &'a str) -> IResult<&'a str, Operand<'a>, E> {
+fn operand<'a, E: ParseError<&'a str>>(i: &'a str) -> IResult<&'a str, Operand, E> {
+    // TODO from_str_radix should be safe since we parse for hex digits. Maybe implement custom error?
     map(
-        preceded(tag("#$"), map_parser(hex_digit1, take(4usize))),
+        map(
+            preceded(tag("#$"), map_parser(hex_digit1, take(4usize))),
+            |s| u16::from_str_radix(s, 16).expect("Parser returned non-hex bytes?"),
+        ),
         Operand::AbsoluteFour,
     )(i)
 }
 
-fn instruction<'a, E: ParseError<&'a str>>(i: &'a str) -> IResult<&'a str, Element<'a>, E> {
+fn instruction<'a, E: ParseError<&'a str>>(i: &'a str) -> IResult<&'a str, Element, E> {
     map(
         tuple((mnemonic, opt(preceded(space1, operand)))),
         |(mnemonic, o)| match o {
@@ -95,10 +101,19 @@ mod tests {
     fn mnemonic_success() {
         let input = "RTS\n";
         let result = mnemonic::<E>(input);
-        assert_eq!(Ok(("\n", Mnemonic("RTS"))), result);
+        assert_eq!(Ok(("\n", Mnemonic::RTS)), result);
         let input = "This_is_a_val1d_mnemOnIc end";
         let result = mnemonic::<E>(input);
-        assert_eq!(Ok((" end", Mnemonic("This_is_a_val1d_mnemOnIc"))), result)
+        assert_eq!(
+            Ok((
+                " end",
+                Mnemonic::UserDefined("This_is_a_val1d_mnemOnIc".to_owned())
+            )),
+            result
+        );
+        let input = "STA";
+        let result = mnemonic::<E>(input);
+        assert_eq!(Ok(("", Mnemonic::UserDefined("STA".to_owned()))), result)
     }
 
     #[test]
@@ -110,9 +125,9 @@ mod tests {
 
     #[test]
     fn operand_success() {
-        let input = "#$90aB; ";
+        let input = "#$1234; ";
         let result = operand::<E>(input);
-        assert_eq!(Ok(("; ", Operand::AbsoluteFour("90aB"))), result)
+        assert_eq!(Ok(("; ", Operand::AbsoluteFour(0x1234))), result)
     }
 
     #[test]
@@ -128,12 +143,12 @@ mod tests {
 
     #[test]
     fn instruction_success_1() {
-        let input = "STA #$0300; ";
+        let input = "STZ #$0300; ";
         let result = instruction::<E>(input);
         assert_eq!(
             Ok((
                 "; ",
-                Element::Instruction(Mnemonic("STA"), Operand::AbsoluteFour("0300"))
+                Element::Instruction(Mnemonic::STZ, Operand::AbsoluteFour(0x0300))
             )),
             result
         )
@@ -144,10 +159,7 @@ mod tests {
         let input = "RTS\n";
         let result = instruction::<E>(input);
         assert_eq!(
-            Ok((
-                "\n",
-                Element::Instruction(Mnemonic("RTS"), Operand::Implied)
-            )),
+            Ok(("\n", Element::Instruction(Mnemonic::RTS, Operand::Implied))),
             result
         )
     }
@@ -161,14 +173,14 @@ mod tests {
 
     #[test]
     fn line_success() {
-        let input = "  STA #$0300\n ";
+        let input = "  STZ #$0300\n ";
         let result = line::<E>(input);
         assert_eq!(
             Ok((
                 " ",
                 Line(vec![Element::Instruction(
-                    Mnemonic("STA"),
-                    Operand::AbsoluteFour("0300"),
+                    Mnemonic::STZ,
+                    Operand::AbsoluteFour(0x0300),
                 )])
             )),
             result
@@ -177,27 +189,24 @@ mod tests {
 
     #[test]
     fn line_fail() {
-        let input = "STA #$0300\n ";
+        let input = "STZ #$0300\n ";
         let result = line::<E>(input);
         assert_eq!(err(input, ErrorKind::Space), result)
     }
 
     #[test]
     fn parse_success() {
-        let input = "  STA #$0300\n  RTS\n";
+        let input = "  STZ #$0300\n  RTS\n";
         let result = parse::<E>(input);
         assert_eq!(
             Ok((
                 "",
                 Parsed(vec![
                     Line(vec![Element::Instruction(
-                        Mnemonic("STA"),
-                        Operand::AbsoluteFour("0300"),
+                        Mnemonic::STZ,
+                        Operand::AbsoluteFour(0x0300),
                     )]),
-                    Line(vec![Element::Instruction(
-                        Mnemonic("RTS"),
-                        Operand::Implied,
-                    )]),
+                    Line(vec![Element::Instruction(Mnemonic::RTS, Operand::Implied,)]),
                 ])
             )),
             result
@@ -206,14 +215,14 @@ mod tests {
 
     #[test]
     fn parse_fail_1() {
-        let input = "  STA #$0300\n  RTS\n ";
+        let input = "  STZ #$0300\n  RTS\n ";
         let result = parse::<E>(input);
         assert_eq!(err(" ", ErrorKind::Eof), result)
     }
 
     #[test]
     fn parse_fail_2() {
-        let input = "  STA #$0300\n  RTS";
+        let input = "  STZ #$0300\n  RTS";
         let result = parse::<E>(input);
         assert_eq!(err("  RTS", ErrorKind::Eof), result)
     }

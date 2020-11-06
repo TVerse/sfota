@@ -1,29 +1,34 @@
 mod code_generator;
 mod parser;
 
-#[derive(Debug, Eq, PartialEq)]
-struct Parsed<'a>(Vec<Line<'a>>);
-
-#[derive(Debug, Eq, PartialEq)]
-struct Line<'a>(Vec<Element<'a>>);
-
-#[derive(Debug, Eq, PartialEq)]
-enum Element<'a> {
-    Instruction(Mnemonic<'a>, Operand<'a>),
-}
-
-#[derive(Debug, Eq, PartialEq)]
-struct Mnemonic<'a>(&'a str);
-
-#[derive(Debug, Eq, PartialEq)]
-enum Operand<'a> {
-    AbsoluteFour(&'a str),
-    Implied,
-}
-
 pub fn assemble(i: &str) -> Vec<u8> {
     let parsed = parser::parse::<()>(i).unwrap(); // TODO error + unwrap
     code_generator::generate_code(parsed.1)
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct Parsed(Vec<Line>);
+
+#[derive(Debug, Eq, PartialEq)]
+struct Line(Vec<Element>);
+
+#[derive(Debug, Eq, PartialEq)]
+enum Element {
+    Instruction(Mnemonic, Operand),
+}
+
+#[derive(Debug, Eq, PartialEq, strum_macros::EnumString)]
+enum Mnemonic {
+    STZ,
+    RTS,
+    #[strum(default)]
+    UserDefined(String),
+}
+
+#[derive(Debug, Eq, PartialEq)]
+enum Operand {
+    AbsoluteFour(u16),
+    Implied,
 }
 
 #[cfg(test)]
