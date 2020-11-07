@@ -6,31 +6,6 @@ pub fn assemble(i: &str) -> Vec<u8> {
     code_generator::generate_code(parsed.1)
 }
 
-#[derive(Debug, Eq, PartialEq)]
-struct Parsed(Vec<Line>);
-
-#[derive(Debug, Eq, PartialEq)]
-struct Line(Vec<Element>);
-
-#[derive(Debug, Eq, PartialEq)]
-enum Element {
-    Instruction(Mnemonic, Operand),
-}
-
-#[derive(Debug, Eq, PartialEq, strum_macros::EnumString)]
-enum Mnemonic {
-    STZ,
-    RTS,
-    #[strum(default)]
-    UserDefined(String),
-}
-
-#[derive(Debug, Eq, PartialEq)]
-enum Operand {
-    AbsoluteFour(u16),
-    Implied,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,4 +1,4 @@
-use super::*;
+use super::parser::*;
 
 pub(crate) fn generate_code(parsed: Parsed) -> Vec<u8> {
     parsed
