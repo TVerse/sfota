@@ -4,8 +4,11 @@ use std::str::FromStr;
 use nom::branch::alt;
 use nom::bytes::complete::{tag, take};
 use nom::character::complete::{alpha1, alphanumeric1, hex_digit1, newline, space1};
-use nom::combinator::{all_consuming, map, map_parser, opt, recognize};
-use nom::error::{context, ContextError, ErrorKind as NomErrorKind, ParseError as NomParseError};
+use nom::combinator::{all_consuming, map, map_parser, map_res, opt, recognize};
+use nom::error::{
+    context, ContextError, ErrorKind as NomErrorKind, FromExternalError,
+    ParseError as NomParseError,
+};
 use nom::multi::many0;
 use nom::sequence::{delimited, preceded, tuple};
 use nom::Finish;
@@ -22,25 +25,20 @@ pub struct Error<I> {
 
 impl<'a> Error<Input<'a>> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Parse error:\n")?;
+        writeln!(f, "Parse error:")?;
         for (input, kind) in self.errors.iter().rev() {
             let prefix = match kind {
                 ErrorKind::Nom(err) => format!("nom error {:?}", err),
                 ErrorKind::Context(ctx) => format!("in {}", ctx),
+                ErrorKind::UndefinedMnemonic(m) => format!("undefined mnemonic \"{}\"", m),
             };
 
-            let input: String = input.chars().take_while(|&c| c != '\n').collect();
-            write!(f, "{:<30} \"{}\"\n", prefix, input)?;
+            let input: String = take_until_newline(input);
+            writeln!(f, "{:<40} \"{}\"", prefix, input)?;
         }
 
         Ok(())
     }
-}
-
-#[derive(Debug, Eq, PartialEq)]
-pub enum ErrorKind {
-    Nom(NomErrorKind),
-    Context(&'static str),
 }
 
 impl<'a> std::error::Error for Error<Input<'a>> {}
@@ -79,6 +77,30 @@ impl<I> ContextError<I> for Error<I> {
         other.errors.push((input, ErrorKind::Context(ctx)));
         other
     }
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub enum ErrorKind {
+    Nom(NomErrorKind),
+    Context(&'static str),
+    UndefinedMnemonic(String), // TODO should not be necessary here? Depends on if we require macros to be defined before use
+}
+
+struct UndefinedMnemonic(String);
+
+impl<'a> FromExternalError<Input<'a>, UndefinedMnemonic> for Error<Input<'a>> {
+    fn from_external_error(input: Input<'a>, kind: NomErrorKind, e: UndefinedMnemonic) -> Self {
+        Error {
+            errors: vec![
+                (input, ErrorKind::Nom(kind)),
+                (input, ErrorKind::UndefinedMnemonic(e.0)),
+            ],
+        }
+    }
+}
+
+fn take_until_newline(input: &str) -> String {
+    input.chars().take_while(|&c| c != '\n').collect()
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -128,24 +150,28 @@ impl Element {
 pub enum Mnemonic {
     STZ,
     RTS,
-    #[strum(default)]
-    UserDefined(String),
 }
 
 impl Mnemonic {
     fn parse(i: Input) -> IResult<Self> {
         context(
             "Mnemonic",
-            // TODO unwrap is safe as long as the default is set. Maybe implement custom error?
-            map(valid_word, |s| Self::from_str(s).unwrap()),
+            map_res(valid_word, |m| {
+                Self::from_str(m).map_err(|_| UndefinedMnemonic(m.to_owned()))
+            }),
         )(i)
     }
 }
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum Operand {
-    AbsoluteFour(u16),
+    AbsoluteFour(OperandDefinition),
     Implied,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub enum OperandDefinition {
+    Direct(u16),
 }
 
 impl Operand {
@@ -158,7 +184,7 @@ impl Operand {
                     preceded(tag("#$"), map_parser(hex_digit1, take(4usize))),
                     |s| u16::from_str_radix(s, 16).expect("Parser returned non-hex bytes?"),
                 ),
-                Self::AbsoluteFour,
+                |addr| Self::AbsoluteFour(OperandDefinition::Direct(addr)),
             ),
         )(i)
     }
@@ -169,10 +195,12 @@ pub fn parse(i: Input) -> Result<Parsed> {
 }
 
 fn valid_start(i: Input) -> IResult<&str> {
+    dbg!(i);
     context("valid_start", alpha1)(i)
 }
 
 fn valid_end(i: Input) -> IResult<&str> {
+    dbg!(i);
     context(
         "valid_end",
         recognize(many0(alt((alphanumeric1, tag("_"))))),
@@ -180,6 +208,7 @@ fn valid_end(i: Input) -> IResult<&str> {
 }
 
 fn valid_word(i: Input) -> IResult<&str> {
+    dbg!(i);
     context("valid_word", recognize(tuple((valid_start, valid_end))))(i)
 }
 
@@ -216,27 +245,29 @@ mod tests {
     }
 
     #[test]
+    fn valid_word_success() {
+        let input = "STA ";
+        let result = valid_word(input);
+        assert_eq!(Ok((" ", "STA")), result)
+    }
+
+    #[test]
     fn mnemonic_success() {
         let input = "RTS\n";
         let result = Mnemonic::parse(input);
         assert_eq!(Ok(("\n", Mnemonic::RTS)), result);
-        let input = "This_is_a_val1d_mnemOnIc end";
-        let result = Mnemonic::parse(input);
-        assert_eq!(
-            Ok((
-                " end",
-                Mnemonic::UserDefined("This_is_a_val1d_mnemOnIc".to_owned())
-            )),
-            result
-        );
-        let input = "STA";
-        let result = Mnemonic::parse(input);
-        assert_eq!(Ok(("", Mnemonic::UserDefined("STA".to_owned()))), result)
     }
 
     #[test]
-    fn mnemonic_fail() {
+    fn mnemonic_fail_1() {
         let input = " not This_is_a_val1d_mnemOnIc end";
+        let result = Mnemonic::parse(input);
+        assert!(result.is_err())
+    }
+
+    #[test]
+    fn mnemonic_fail_2() {
+        let input = "STA #$0300\n";
         let result = Mnemonic::parse(input);
         assert!(result.is_err())
     }
@@ -245,7 +276,13 @@ mod tests {
     fn operand_success() {
         let input = "#$1234; ";
         let result = Operand::parse(input);
-        assert_eq!(Ok(("; ", Operand::AbsoluteFour(0x1234))), result)
+        assert_eq!(
+            Ok((
+                "; ",
+                Operand::AbsoluteFour(OperandDefinition::Direct(0x1234))
+            )),
+            result
+        )
     }
 
     #[test]
@@ -266,7 +303,10 @@ mod tests {
         assert_eq!(
             Ok((
                 "; ",
-                Element::Instruction(Mnemonic::STZ, Operand::AbsoluteFour(0x0300))
+                Element::Instruction(
+                    Mnemonic::STZ,
+                    Operand::AbsoluteFour(OperandDefinition::Direct(0x0300))
+                )
             )),
             result
         )
@@ -298,7 +338,7 @@ mod tests {
                 " ",
                 Line(vec![Element::Instruction(
                     Mnemonic::STZ,
-                    Operand::AbsoluteFour(0x0300),
+                    Operand::AbsoluteFour(OperandDefinition::Direct(0x0300)),
                 )])
             )),
             result
@@ -320,7 +360,7 @@ mod tests {
             Ok(Parsed(vec![
                 Line(vec![Element::Instruction(
                     Mnemonic::STZ,
-                    Operand::AbsoluteFour(0x0300),
+                    Operand::AbsoluteFour(OperandDefinition::Direct(0x0300)),
                 )]),
                 Line(vec![Element::Instruction(Mnemonic::RTS, Operand::Implied)]),
             ])),
