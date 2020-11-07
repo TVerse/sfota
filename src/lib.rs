@@ -2,8 +2,8 @@ mod code_generator;
 mod parser;
 
 pub fn assemble(i: &str) -> Vec<u8> {
-    let parsed = parser::parse::<()>(i).unwrap(); // TODO error + unwrap
-    code_generator::generate_code(parsed.1)
+    let parsed = parser::parse(i).unwrap(); // TODO error + unwrap
+    code_generator::generate_code(parsed)
 }
 
 #[cfg(test)]
