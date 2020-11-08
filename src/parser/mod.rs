@@ -3,7 +3,7 @@ use std::str::FromStr;
 
 use nom::branch::alt;
 use nom::bytes::complete::{tag, take};
-use nom::character::complete::{alpha1, alphanumeric1, hex_digit1, newline, space1};
+use nom::character::complete::{alpha1, alphanumeric1, hex_digit1, multispace1, newline, space1};
 use nom::combinator::{all_consuming, map, map_parser, map_res, opt, recognize};
 use nom::error::{
     context, ContextError, ErrorKind as NomErrorKind, FromExternalError,
@@ -119,9 +119,12 @@ impl Line {
     fn parse(i: Input) -> IResult<Self> {
         context(
             "line",
-            map(delimited(space1, Element::instruction, newline), |e| {
-                Self(vec![e])
-            }),
+            alt((
+                map(delimited(space1, Element::instruction, newline), |e| {
+                    Self(vec![e])
+                }),
+                map(recognize(multispace1), |_| Self(vec![])),
+            )),
         )(i)
     }
 }
@@ -165,7 +168,7 @@ impl Mnemonic {
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum Operand {
-    AbsoluteFour(OperandDefinition),
+    Absolute(OperandDefinition),
     Implied,
 }
 
@@ -184,7 +187,7 @@ impl Operand {
                     preceded(tag("#$"), map_parser(hex_digit1, take(4usize))),
                     |s| u16::from_str_radix(s, 16).expect("Parser returned non-hex bytes?"),
                 ),
-                |addr| Self::AbsoluteFour(OperandDefinition::Direct(addr)),
+                |addr| Self::Absolute(OperandDefinition::Direct(addr)),
             ),
         )(i)
     }
@@ -277,10 +280,7 @@ mod tests {
         let input = "#$1234; ";
         let result = Operand::parse(input);
         assert_eq!(
-            Ok((
-                "; ",
-                Operand::AbsoluteFour(OperandDefinition::Direct(0x1234))
-            )),
+            Ok(("; ", Operand::Absolute(OperandDefinition::Direct(0x1234)))),
             result
         )
     }
@@ -305,7 +305,7 @@ mod tests {
                 "; ",
                 Element::Instruction(
                     Mnemonic::STZ,
-                    Operand::AbsoluteFour(OperandDefinition::Direct(0x0300))
+                    Operand::Absolute(OperandDefinition::Direct(0x0300)),
                 )
             )),
             result
@@ -338,7 +338,7 @@ mod tests {
                 " ",
                 Line(vec![Element::Instruction(
                     Mnemonic::STZ,
-                    Operand::AbsoluteFour(OperandDefinition::Direct(0x0300)),
+                    Operand::Absolute(OperandDefinition::Direct(0x0300)),
                 )])
             )),
             result
@@ -360,7 +360,7 @@ mod tests {
             Ok(Parsed(vec![
                 Line(vec![Element::Instruction(
                     Mnemonic::STZ,
-                    Operand::AbsoluteFour(OperandDefinition::Direct(0x0300)),
+                    Operand::Absolute(OperandDefinition::Direct(0x0300)),
                 )]),
                 Line(vec![Element::Instruction(Mnemonic::RTS, Operand::Implied)]),
             ])),
@@ -370,13 +370,6 @@ mod tests {
 
     #[test]
     fn parse_fail_1() {
-        let input = "  STZ #$0300\n  RTS\n ";
-        let result = parse(input);
-        assert!(result.is_err())
-    }
-
-    #[test]
-    fn parse_fail_2() {
         let input = "  STZ #$0300\n  RTS";
         let result = parse(input);
         assert!(result.is_err())
