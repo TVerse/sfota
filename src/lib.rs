@@ -4,12 +4,12 @@ mod parser;
 #[derive(Debug)]
 pub enum Error<'a> {
     ParsingError(parser::Error<&'a str>),
-    CodeGenError(code_generator::Error)
+    CodeGenError(code_generator::Error),
 }
 
 pub fn assemble(i: &str) -> Result<Vec<u8>, Error> {
-    let parsed = parser::parse(i).map_err(|e| Error::ParsingError(e))?; // TODO error + unwrap
-    code_generator::generate_code(parsed).map_err(|e| Error::CodeGenError(e))
+    let parsed = parser::parse(i).map_err(Error::ParsingError)?;
+    code_generator::generate_code(parsed).map_err(Error::CodeGenError)
 }
 
 #[cfg(test)]

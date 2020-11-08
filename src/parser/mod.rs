@@ -1,17 +1,19 @@
 use std::fmt;
-use std::str::FromStr;
 
 use nom::branch::alt;
-use nom::bytes::complete::{tag, take};
-use nom::character::complete::{alpha1, alphanumeric1, hex_digit1, multispace1, newline, space1};
-use nom::combinator::{all_consuming, map, map_parser, map_res, opt, recognize};
-use nom::error::{
-    context, ContextError, ErrorKind as NomErrorKind, FromExternalError,
-    ParseError as NomParseError,
-};
+use nom::bytes::complete::tag;
+use nom::character::complete::{alpha1, alphanumeric1, multispace1, newline, space1};
+use nom::combinator::{all_consuming, map, recognize};
+use nom::error::{context, ContextError, ErrorKind as NomErrorKind, ParseError as NomParseError};
 use nom::multi::many0;
-use nom::sequence::{delimited, preceded, tuple};
+use nom::sequence::{delimited, tuple};
 use nom::Finish;
+
+mod instruction;
+
+use instruction::mnemonic::Mnemonic;
+pub use instruction::operand::Operand;
+pub use instruction::Instruction;
 
 pub type Input<'a> = &'a str;
 pub type Result<'a, T> = std::result::Result<T, Error<Input<'a>>>;
@@ -31,6 +33,7 @@ impl<'a> Error<Input<'a>> {
                 ErrorKind::Nom(err) => format!("nom error {:?}", err),
                 ErrorKind::Context(ctx) => format!("in {}", ctx),
                 ErrorKind::UndefinedMnemonic(m) => format!("undefined mnemonic \"{}\"", m),
+                ErrorKind::InvalidAddressingMode(m, o) => format!("invalid mode: {}, {}", m, o),
             };
 
             let input: String = take_until_newline(input);
@@ -84,19 +87,7 @@ pub enum ErrorKind {
     Nom(NomErrorKind),
     Context(&'static str),
     UndefinedMnemonic(String), // TODO should not be necessary here? Depends on if we require macros to be defined before use
-}
-
-struct UndefinedMnemonic(String);
-
-impl<'a> FromExternalError<Input<'a>, UndefinedMnemonic> for Error<Input<'a>> {
-    fn from_external_error(input: Input<'a>, kind: NomErrorKind, e: UndefinedMnemonic) -> Self {
-        Error {
-            errors: vec![
-                (input, ErrorKind::Nom(kind)),
-                (input, ErrorKind::UndefinedMnemonic(e.0)),
-            ],
-        }
-    }
+    InvalidAddressingMode(Mnemonic, Operand),
 }
 
 fn take_until_newline(input: &str) -> String {
@@ -120,7 +111,7 @@ impl Line {
         context(
             "line",
             alt((
-                map(delimited(space1, Element::instruction, newline), |e| {
+                map(delimited(space1, Element::parse, newline), |e| {
                     Self(vec![e])
                 }),
                 map(recognize(multispace1), |_| Self(vec![])),
@@ -131,70 +122,16 @@ impl Line {
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum Element {
-    Instruction(Mnemonic, Operand),
+    Instruction(instruction::Instruction),
 }
 
 impl Element {
-    fn instruction(i: Input) -> IResult<Self> {
-        context(
-            "Instruction",
-            map(
-                tuple((Mnemonic::parse, opt(preceded(space1, Operand::parse)))),
-                |(mnemonic, o)| match o {
-                    Some(operand) => Self::Instruction(mnemonic, operand),
-                    None => Self::Instruction(mnemonic, Operand::Implied),
-                },
-            ),
-        )(i)
-    }
-}
-
-#[derive(Debug, Eq, PartialEq, strum_macros::EnumString)]
-pub enum Mnemonic {
-    STZ,
-    RTS,
-}
-
-impl Mnemonic {
     fn parse(i: Input) -> IResult<Self> {
         context(
-            "Mnemonic",
-            map_res(valid_word, |m| {
-                Self::from_str(m).map_err(|_| UndefinedMnemonic(m.to_owned()))
-            }),
+            "Element",
+            map(instruction::Instruction::parse, Element::Instruction),
         )(i)
     }
-}
-
-#[derive(Debug, Eq, PartialEq)]
-pub enum Operand {
-    Absolute(OperandDefinition),
-    Implied,
-}
-
-#[derive(Debug, Eq, PartialEq)]
-pub enum OperandDefinition {
-    Direct(u16),
-}
-
-impl Operand {
-    fn parse(i: Input) -> IResult<Self> {
-        context(
-            "Operand",
-            // TODO from_str_radix should be safe since we parse for hex digits. Maybe implement custom error?
-            map(
-                map(
-                    preceded(tag("#$"), map_parser(hex_digit1, take(4usize))),
-                    |s| u16::from_str_radix(s, 16).expect("Parser returned non-hex bytes?"),
-                ),
-                |addr| Self::Absolute(OperandDefinition::Direct(addr)),
-            ),
-        )(i)
-    }
-}
-
-pub fn parse(i: Input) -> Result<Parsed> {
-    Finish::finish(Parsed::parse(i)).map(|(_i, p)| p)
 }
 
 fn valid_start(i: Input) -> IResult<&str> {
@@ -213,6 +150,10 @@ fn valid_end(i: Input) -> IResult<&str> {
 fn valid_word(i: Input) -> IResult<&str> {
     dbg!(i);
     context("valid_word", recognize(tuple((valid_start, valid_end))))(i)
+}
+
+pub fn parse(i: Input) -> Result<Parsed> {
+    Finish::finish(Parsed::parse(i)).map(|(_i, p)| p)
 }
 
 #[cfg(test)]
@@ -255,77 +196,29 @@ mod tests {
     }
 
     #[test]
-    fn mnemonic_success() {
-        let input = "RTS\n";
-        let result = Mnemonic::parse(input);
-        assert_eq!(Ok(("\n", Mnemonic::RTS)), result);
-    }
-
-    #[test]
-    fn mnemonic_fail_1() {
-        let input = " not This_is_a_val1d_mnemOnIc end";
-        let result = Mnemonic::parse(input);
-        assert!(result.is_err())
-    }
-
-    #[test]
-    fn mnemonic_fail_2() {
-        let input = "STA #$0300\n";
-        let result = Mnemonic::parse(input);
-        assert!(result.is_err())
-    }
-
-    #[test]
-    fn operand_success() {
-        let input = "#$1234; ";
-        let result = Operand::parse(input);
-        assert_eq!(
-            Ok(("; ", Operand::Absolute(OperandDefinition::Direct(0x1234)))),
-            result
-        )
-    }
-
-    #[test]
-    fn operand_failure() {
-        let input = "90aB; ";
-        let result = Operand::parse(input);
-        assert!(result.is_err());
-
-        let input = "#$90a; ";
-        let result = Operand::parse(input);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn instruction_success_1() {
+    fn element_success_1() {
         let input = "STZ #$0300; ";
-        let result = Element::instruction(input);
+        let result = Element::parse(input);
         assert_eq!(
-            Ok((
-                "; ",
-                Element::Instruction(
-                    Mnemonic::STZ,
-                    Operand::Absolute(OperandDefinition::Direct(0x0300)),
-                )
-            )),
+            Ok(("; ", Element::Instruction(Instruction::StzAbsolute(0x0300)))),
             result
         )
     }
 
     #[test]
-    fn instruction_success_2() {
-        let input = "RTS\n";
-        let result = Element::instruction(input);
+    fn element_success_2() {
+        let input = "RTS ";
+        let result = Element::parse(input);
         assert_eq!(
-            Ok(("\n", Element::Instruction(Mnemonic::RTS, Operand::Implied))),
+            Ok((" ", Element::Instruction(Instruction::RtsStack))),
             result
         )
     }
 
     #[test]
-    fn instruction_fail() {
+    fn element_fail() {
         let input = "090";
-        let result = Element::instruction(input);
+        let result = Element::parse(input);
         assert!(result.is_err())
     }
 
@@ -336,10 +229,7 @@ mod tests {
         assert_eq!(
             Ok((
                 " ",
-                Line(vec![Element::Instruction(
-                    Mnemonic::STZ,
-                    Operand::Absolute(OperandDefinition::Direct(0x0300)),
-                )])
+                Line(vec![Element::Instruction(Instruction::StzAbsolute(0x300))])
             )),
             result
         )
@@ -358,11 +248,8 @@ mod tests {
         let result = parse(input);
         assert_eq!(
             Ok(Parsed(vec![
-                Line(vec![Element::Instruction(
-                    Mnemonic::STZ,
-                    Operand::Absolute(OperandDefinition::Direct(0x0300)),
-                )]),
-                Line(vec![Element::Instruction(Mnemonic::RTS, Operand::Implied)]),
+                Line(vec![Element::Instruction(Instruction::StzAbsolute(0x300))]),
+                Line(vec![Element::Instruction(Instruction::RtsStack)]),
             ])),
             result
         )
