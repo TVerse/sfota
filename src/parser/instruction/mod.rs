@@ -1,9 +1,11 @@
-use nom::combinator::{map_res};
+use nom::character::complete::space1;
+use nom::combinator::map_res;
 use nom::error::{context, ErrorKind as NomErrorKind, FromExternalError};
-use nom::sequence::{tuple};
+use nom::sequence::{preceded, tuple};
 
 use mnemonic::Mnemonic;
 use operand::Operand;
+use operand::OperandType;
 
 use super::{Error, ErrorKind, IResult, Input};
 
@@ -25,8 +27,9 @@ impl<'a> FromExternalError<Input<'a>, InvalidAddressingMode> for Error<Input<'a>
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum Instruction {
-    StzAbsolute(u16),
+    StzAbsolute(OperandType<u16>),
     RtsStack,
+    JmpAbsolute(OperandType<u16>),
 }
 
 impl Instruction {
@@ -35,14 +38,23 @@ impl Instruction {
         context(
             "Instruction",
             map_res(
-                tuple((Mnemonic::parse, Operand::parse)),
+                preceded(space1, tuple((Mnemonic::parse, Operand::parse))),
                 |(mnemonic, operand)| match (mnemonic, operand) {
                     (Mnemonic::STZ, Operand::Absolute(a)) => Ok(StzAbsolute(a)),
                     (Mnemonic::RTS, Operand::NoOperand) => Ok(RtsStack),
+                    (Mnemonic::JMP, Operand::Absolute(a)) => Ok(JmpAbsolute(a)),
                     (mnemonic, operand) => Err(InvalidAddressingMode(mnemonic, operand)),
                 },
             ),
         )(i)
+    }
+
+    pub fn instruction_byte(&self) -> u8 {
+        match self {
+            Instruction::StzAbsolute(_) => 0x9C,
+            Instruction::RtsStack => 0x60,
+            Instruction::JmpAbsolute(_) => 0x4C,
+        }
     }
 }
 
@@ -52,20 +64,30 @@ mod tests {
 
     #[test]
     fn instruction_success_1() {
-        let input = "STZ #$0300; ";
+        let input = "  STZ $0300; ";
         let result = Instruction::parse(input);
         assert_eq!(
-            Ok(("; ", Instruction::StzAbsolute(0x0300))),
+            Ok(("; ", Instruction::StzAbsolute(OperandType::Known(0x0300)))),
             result
         )
     }
 
     #[test]
     fn instruction_success_2() {
-        let input = "RTS ";
+        let input = "  RTS ";
+        let result = Instruction::parse(input);
+        assert_eq!(Ok((" ", Instruction::RtsStack)), result)
+    }
+
+    #[test]
+    fn instruction_success_3() {
+        let input = "  JMP loop ";
         let result = Instruction::parse(input);
         assert_eq!(
-            Ok((" ", Instruction::RtsStack)),
+            Ok((
+                " ",
+                Instruction::JmpAbsolute(OperandType::Label("loop".to_owned()))
+            )),
             result
         )
     }

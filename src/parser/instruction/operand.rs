@@ -1,14 +1,15 @@
+use nom::branch::alt;
 use nom::bytes::complete::{tag, take};
 use nom::character::complete::{hex_digit1, space1};
 use nom::combinator::{map, map_parser, opt};
 use nom::error::context;
 use nom::sequence::preceded;
 
-use crate::parser::{IResult, Input};
+use crate::parser::{valid_word, IResult, Input};
 
 #[derive(Debug, Eq, PartialEq, strum_macros::Display)]
 pub enum Operand {
-    Absolute(u16),
+    Absolute(OperandType<u16>),
     NoOperand,
 }
 
@@ -18,19 +19,25 @@ impl Operand {
         context(
             "Operand",
             map(
-                opt(
+                opt(preceded(
+                    space1,
                     map(
-                        map(
-                            preceded(
-                                preceded(space1, tag("#$")),
-                                map_parser(hex_digit1, take(4usize)),
+                        alt((
+                            map(
+                                preceded(tag("$"), map_parser(hex_digit1, take(4usize))),
+                                // TODO from_str_radix should be safe since we parse for hex digits. Maybe implement custom error?
+                                |s| {
+                                    OperandType::Known(
+                                        u16::from_str_radix(s, 16)
+                                            .expect("Parser returned non-hex bytes?"),
+                                    )
+                                },
                             ),
-                            // TODO from_str_radix should be safe since we parse for hex digits. Maybe implement custom error?
-                            |s| u16::from_str_radix(s, 16).expect("Parser returned non-hex bytes?"),
-                        ),
+                            map(valid_word, |w| OperandType::Label(w.to_owned())),
+                        )),
                         Self::Absolute,
                     ),
-                ),
+                )),
                 |maybe_op| match maybe_op {
                     Some(op) => op,
                     None => Operand::NoOperand,
@@ -40,27 +47,49 @@ impl Operand {
     }
 }
 
+#[derive(Debug, Eq, PartialEq, strum_macros::Display)]
+pub enum OperandType<T> {
+    Known(T),
+    Label(String),
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn operand_success() {
-        let input = " #$1234; ";
+    fn absolute_success() {
+        let input = " $1234; ";
         let result = Operand::parse(input);
-        assert_eq!(Ok(("; ", Operand::Absolute(0x1234))), result)
+        assert_eq!(
+            Ok(("; ", Operand::Absolute(OperandType::Known(0x1234)))),
+            result
+        )
     }
 
     #[test]
-    fn operand_miss() {
+    fn absolute_miss() {
         let input = "90aB; ";
         let result = Operand::parse(input);
         dbg!(&result);
         assert_eq!(Ok((input, Operand::NoOperand)), result); // TODO is this good?
 
-        let input = "#$90a; ";
+        let input = "$90a; ";
         let result = Operand::parse(input);
         dbg!(&result);
         assert_eq!(Ok((input, Operand::NoOperand)), result); // TODO is this good?
+    }
+
+    #[test]
+    fn label_success() {
+        let input = " loop; ";
+        let result = Operand::parse(input);
+        assert_eq!(
+            Ok((
+                "; ",
+                Operand::Absolute(OperandType::Label("loop".to_owned()))
+            )),
+            result
+        )
     }
 }

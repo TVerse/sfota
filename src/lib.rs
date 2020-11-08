@@ -18,8 +18,32 @@ mod tests {
 
     #[test]
     fn basic_assemble() {
-        let input = "  STZ #$0300\n  RTS\n ";
+        let input = "  STZ $0300\n  RTS\n";
         let result = assemble(input);
         assert_eq!(vec![0x9C, 0x00, 0x03, 0x60], result.unwrap())
+    }
+
+    #[test]
+    fn loop_assemble() {
+        let input = "  STZ $1234\nloop:\n  JMP loop\n";
+        let result = assemble(input);
+        assert_eq!(vec![0x9C, 0x34, 0x12, 0x4C, 0x03, 0x00], result.unwrap())
+    }
+
+    #[test]
+    fn forward_assemble() {
+        let input = "  JMP loop\nloop:\n  STZ $1234\n";
+        let result = assemble(input);
+        assert_eq!(vec![0x4C, 0x03, 0x00, 0x9C, 0x34, 0x12,], result.unwrap())
+    }
+
+    #[test]
+    fn both_assemble() {
+        let input = "  STZ $1234\nlbl2:\n  JMP lbl1\nlbl1:\n  STZ $1234\n  JMP lbl2\n";
+        let result = assemble(input);
+        assert_eq!(
+            vec![0x9C, 0x34, 0x12, 0x4C, 0x06, 0x00, 0x9C, 0x34, 0x12, 0x4C, 0x03, 0x00],
+            result.unwrap()
+        )
     }
 }

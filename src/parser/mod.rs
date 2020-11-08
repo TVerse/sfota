@@ -2,18 +2,18 @@ use std::fmt;
 
 use nom::branch::alt;
 use nom::bytes::complete::tag;
-use nom::character::complete::{alpha1, alphanumeric1, multispace1, newline, space1};
+use nom::character::complete::{alpha1, alphanumeric1, newline};
 use nom::combinator::{all_consuming, map, recognize};
 use nom::error::{context, ContextError, ErrorKind as NomErrorKind, ParseError as NomParseError};
-use nom::multi::many0;
-use nom::sequence::{delimited, tuple};
+use nom::multi::{many0, many1};
+use nom::sequence::{delimited, terminated, tuple};
 use nom::Finish;
 
-mod instruction;
-
 use instruction::mnemonic::Mnemonic;
-pub use instruction::operand::Operand;
+pub use instruction::operand::{Operand, OperandType};
 pub use instruction::Instruction;
+
+mod instruction;
 
 pub type Input<'a> = &'a str;
 pub type Result<'a, T> = std::result::Result<T, Error<Input<'a>>>;
@@ -36,6 +36,7 @@ impl<'a> Error<Input<'a>> {
                 ErrorKind::InvalidAddressingMode(m, o) => format!("invalid mode: {}, {}", m, o),
             };
 
+            // TODO better way to do line numbering
             let input: String = take_until_newline(input);
             writeln!(f, "{:<40} \"{}\"", prefix, input)?;
         }
@@ -86,8 +87,9 @@ impl<I> ContextError<I> for Error<I> {
 pub enum ErrorKind {
     Nom(NomErrorKind),
     Context(&'static str),
-    UndefinedMnemonic(String), // TODO should not be necessary here? Depends on if we require macros to be defined before use
+    // TODO should not be necessary here? Depends on if we require macros to be defined before use
     InvalidAddressingMode(Mnemonic, Operand),
+    UndefinedMnemonic(String),
 }
 
 fn take_until_newline(input: &str) -> String {
@@ -95,26 +97,15 @@ fn take_until_newline(input: &str) -> String {
 }
 
 #[derive(Debug, Eq, PartialEq)]
-pub struct Parsed(pub Vec<Line>);
+pub struct Parsed(pub Vec<Element>);
 
 impl Parsed {
     fn parse(i: Input) -> IResult<Self> {
-        context("File", all_consuming(map(many0(Line::parse), Self)))(i)
-    }
-}
-
-#[derive(Debug, Eq, PartialEq)]
-pub struct Line(pub Vec<Element>);
-
-impl Line {
-    fn parse(i: Input) -> IResult<Self> {
         context(
-            "line",
-            alt((
-                map(delimited(space1, Element::parse, newline), |e| {
-                    Self(vec![e])
-                }),
-                map(recognize(multispace1), |_| Self(vec![])),
+            "File",
+            all_consuming(map(
+                many0(delimited(many0(newline), Element::parse, many1(newline))),
+                Self,
             )),
         )(i)
     }
@@ -123,15 +114,41 @@ impl Line {
 #[derive(Debug, Eq, PartialEq)]
 pub enum Element {
     Instruction(instruction::Instruction),
+    Label(String),
 }
 
 impl Element {
     fn parse(i: Input) -> IResult<Self> {
         context(
             "Element",
-            map(instruction::Instruction::parse, Element::Instruction),
+            alt((
+                map(Label::parse, Element::Label),
+                map(instruction::Instruction::parse, Element::Instruction),
+            )),
         )(i)
     }
+}
+
+#[derive(Debug, Eq, PartialEq, Hash)]
+pub struct Label(String);
+
+impl Label {
+    fn parse(i: Input) -> IResult<String> {
+        dbg!(i);
+        context(
+            "Label",
+            map(terminated(valid_word, tag(":")), |s| s.to_owned()),
+        )(i)
+    }
+}
+
+pub fn parse(i: Input) -> Result<Parsed> {
+    Finish::finish(Parsed::parse(i)).map(|(_i, p)| p)
+}
+
+fn valid_word(i: Input) -> IResult<&str> {
+    dbg!(i);
+    context("valid_word", recognize(tuple((valid_start, valid_end))))(i)
 }
 
 fn valid_start(i: Input) -> IResult<&str> {
@@ -145,15 +162,6 @@ fn valid_end(i: Input) -> IResult<&str> {
         "valid_end",
         recognize(many0(alt((alphanumeric1, tag("_"))))),
     )(i)
-}
-
-fn valid_word(i: Input) -> IResult<&str> {
-    dbg!(i);
-    context("valid_word", recognize(tuple((valid_start, valid_end))))(i)
-}
-
-pub fn parse(i: Input) -> Result<Parsed> {
-    Finish::finish(Parsed::parse(i)).map(|(_i, p)| p)
 }
 
 #[cfg(test)]
@@ -197,17 +205,20 @@ mod tests {
 
     #[test]
     fn element_success_1() {
-        let input = "STZ #$0300; ";
+        let input = "  STZ $0300; ";
         let result = Element::parse(input);
         assert_eq!(
-            Ok(("; ", Element::Instruction(Instruction::StzAbsolute(0x0300)))),
+            Ok((
+                "; ",
+                Element::Instruction(Instruction::StzAbsolute(OperandType::Known(0x0300)))
+            )),
             result
         )
     }
 
     #[test]
     fn element_success_2() {
-        let input = "RTS ";
+        let input = "  RTS ";
         let result = Element::parse(input);
         assert_eq!(
             Ok((" ", Element::Instruction(Instruction::RtsStack))),
@@ -223,33 +234,26 @@ mod tests {
     }
 
     #[test]
-    fn line_success() {
-        let input = "  STZ #$0300\n ";
-        let result = Line::parse(input);
+    fn parse_success_1() {
+        let input = "  STZ $0300\n  RTS\n";
+        let result = parse(input);
         assert_eq!(
-            Ok((
-                " ",
-                Line(vec![Element::Instruction(Instruction::StzAbsolute(0x300))])
-            )),
+            Ok(Parsed(vec![
+                Element::Instruction(Instruction::StzAbsolute(OperandType::Known(0x300))),
+                Element::Instruction(Instruction::RtsStack),
+            ])),
             result
         )
     }
 
     #[test]
-    fn line_fail() {
-        let input = "STZ #$0300\n ";
-        let result = Line::parse(input);
-        assert!(result.is_err())
-    }
-
-    #[test]
-    fn parse_success() {
-        let input = "  STZ #$0300\n  RTS\n";
+    fn parse_success_2() {
+        let input = "\n\n  STZ $0300\n\n\n  RTS\n\n";
         let result = parse(input);
         assert_eq!(
             Ok(Parsed(vec![
-                Line(vec![Element::Instruction(Instruction::StzAbsolute(0x300))]),
-                Line(vec![Element::Instruction(Instruction::RtsStack)]),
+                Element::Instruction(Instruction::StzAbsolute(OperandType::Known(0x300))),
+                Element::Instruction(Instruction::RtsStack),
             ])),
             result
         )
@@ -257,7 +261,7 @@ mod tests {
 
     #[test]
     fn parse_fail_1() {
-        let input = "  STZ #$0300\n  RTS";
+        let input = "  STZ $0300\n  RTS";
         let result = parse(input);
         assert!(result.is_err())
     }

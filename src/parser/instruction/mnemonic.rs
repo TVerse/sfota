@@ -22,6 +22,7 @@ impl<'a> FromExternalError<Input<'a>, UndefinedMnemonic> for Error<Input<'a>> {
 pub enum Mnemonic {
     STZ,
     RTS,
+    JMP,
 }
 
 impl Mnemonic {
