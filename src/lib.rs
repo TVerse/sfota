@@ -22,4 +22,11 @@ mod tests {
         let result = assemble(input);
         assert_eq!(vec![0x9C, 0x00, 0x03, 0x60], result.unwrap())
     }
+
+    #[test]
+    fn loop_assemble() {
+        let input = "  STZ #$1234\nloop:\n  JMP loop\n";
+        let result = assemble(input);
+        assert_eq!(vec![0x9C, 0x34, 0x12, 0x4C, 0x03, 0x00], result.unwrap())
+    }
 }

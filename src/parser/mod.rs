@@ -5,15 +5,15 @@ use nom::bytes::complete::tag;
 use nom::character::complete::{alpha1, alphanumeric1, multispace1, newline, space1};
 use nom::combinator::{all_consuming, map, recognize};
 use nom::error::{context, ContextError, ErrorKind as NomErrorKind, ParseError as NomParseError};
-use nom::multi::many0;
-use nom::sequence::{delimited, tuple};
 use nom::Finish;
+use nom::multi::many0;
+use nom::sequence::{delimited, terminated, tuple};
+
+pub use instruction::Instruction;
+use instruction::mnemonic::Mnemonic;
+pub use instruction::operand::{Operand, OperandType};
 
 mod instruction;
-
-use instruction::mnemonic::Mnemonic;
-pub use instruction::operand::Operand;
-pub use instruction::Instruction;
 
 pub type Input<'a> = &'a str;
 pub type Result<'a, T> = std::result::Result<T, Error<Input<'a>>>;
@@ -86,7 +86,8 @@ impl<I> ContextError<I> for Error<I> {
 pub enum ErrorKind {
     Nom(NomErrorKind),
     Context(&'static str),
-    UndefinedMnemonic(String), // TODO should not be necessary here? Depends on if we require macros to be defined before use
+    UndefinedMnemonic(String),
+    // TODO should not be necessary here? Depends on if we require macros to be defined before use
     InvalidAddressingMode(Mnemonic, Operand),
 }
 
@@ -123,13 +124,25 @@ impl Line {
 #[derive(Debug, Eq, PartialEq)]
 pub enum Element {
     Instruction(instruction::Instruction),
+    Label(String),
 }
 
 impl Element {
     fn parse(i: Input) -> IResult<Self> {
         context(
             "Element",
-            map(instruction::Instruction::parse, Element::Instruction),
+            alt((
+                map(Element::label, Element::Label),
+                map(instruction::Instruction::parse, Element::Instruction),
+            )),
+        )(i)
+    }
+
+    fn label(i: Input) -> IResult<String> {
+        dbg!(i);
+        context(
+            "Label",
+            map(terminated(valid_word, tag(":")), |s| s.to_owned()),
         )(i)
     }
 }
@@ -200,7 +213,7 @@ mod tests {
         let input = "STZ #$0300; ";
         let result = Element::parse(input);
         assert_eq!(
-            Ok(("; ", Element::Instruction(Instruction::StzAbsolute(0x0300)))),
+            Ok(("; ", Element::Instruction(Instruction::StzAbsolute(OperandType::Known(0x0300))))),
             result
         )
     }
@@ -229,7 +242,7 @@ mod tests {
         assert_eq!(
             Ok((
                 " ",
-                Line(vec![Element::Instruction(Instruction::StzAbsolute(0x300))])
+                Line(vec![Element::Instruction(Instruction::StzAbsolute(OperandType::Known(0x300)))])
             )),
             result
         )
@@ -248,7 +261,7 @@ mod tests {
         let result = parse(input);
         assert_eq!(
             Ok(Parsed(vec![
-                Line(vec![Element::Instruction(Instruction::StzAbsolute(0x300))]),
+                Line(vec![Element::Instruction(Instruction::StzAbsolute(OperandType::Known(0x300)))]),
                 Line(vec![Element::Instruction(Instruction::RtsStack)]),
             ])),
             result

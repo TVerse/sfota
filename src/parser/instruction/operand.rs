@@ -8,8 +8,14 @@ use crate::parser::{IResult, Input};
 
 #[derive(Debug, Eq, PartialEq, strum_macros::Display)]
 pub enum Operand {
-    Absolute(u16),
+    Absolute(OperandType<u16>),
     NoOperand,
+}
+
+#[derive(Debug, Eq, PartialEq, strum_macros::Display)]
+pub enum OperandType<T> {
+    Known(T),
+    Label(String)
 }
 
 impl Operand {
@@ -18,19 +24,17 @@ impl Operand {
         context(
             "Operand",
             map(
-                opt(
+                opt(map(
                     map(
-                        map(
-                            preceded(
-                                preceded(space1, tag("#$")),
-                                map_parser(hex_digit1, take(4usize)),
-                            ),
-                            // TODO from_str_radix should be safe since we parse for hex digits. Maybe implement custom error?
-                            |s| u16::from_str_radix(s, 16).expect("Parser returned non-hex bytes?"),
+                        preceded(
+                            preceded(space1, tag("#$")),
+                            map_parser(hex_digit1, take(4usize)),
                         ),
-                        Self::Absolute,
+                        // TODO from_str_radix should be safe since we parse for hex digits. Maybe implement custom error?
+                        |s| u16::from_str_radix(s, 16).expect("Parser returned non-hex bytes?"),
                     ),
-                ),
+                    |x| Self::Absolute(OperandType::Known(x)),
+                )),
                 |maybe_op| match maybe_op {
                     Some(op) => op,
                     None => Operand::NoOperand,
@@ -48,7 +52,7 @@ mod tests {
     fn operand_success() {
         let input = " #$1234; ";
         let result = Operand::parse(input);
-        assert_eq!(Ok(("; ", Operand::Absolute(0x1234))), result)
+        assert_eq!(Ok(("; ", Operand::Absolute(OperandType::Known(0x1234)))), result)
     }
 
     #[test]
