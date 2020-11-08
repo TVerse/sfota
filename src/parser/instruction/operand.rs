@@ -1,22 +1,16 @@
+use nom::branch::alt;
 use nom::bytes::complete::{tag, take};
 use nom::character::complete::{hex_digit1, space1};
 use nom::combinator::{map, map_parser, opt};
 use nom::error::context;
 use nom::sequence::preceded;
 
-use crate::parser::{IResult, Input, valid_word};
-use nom::branch::alt;
+use crate::parser::{valid_word, IResult, Input};
 
 #[derive(Debug, Eq, PartialEq, strum_macros::Display)]
 pub enum Operand {
     Absolute(OperandType<u16>),
     NoOperand,
-}
-
-#[derive(Debug, Eq, PartialEq, strum_macros::Display)]
-pub enum OperandType<T> {
-    Known(T),
-    Label(String),
 }
 
 impl Operand {
@@ -25,26 +19,25 @@ impl Operand {
         context(
             "Operand",
             map(
-                opt(
-                    alt((
-                        map(
-                    preceded(
-                        preceded(space1, tag("$")),
-                        map_parser(hex_digit1, take(4usize)),
+                opt(preceded(
+                    space1,
+                    map(
+                        alt((
+                            map(
+                                preceded(tag("$"), map_parser(hex_digit1, take(4usize))),
+                                // TODO from_str_radix should be safe since we parse for hex digits. Maybe implement custom error?
+                                |s| {
+                                    OperandType::Known(
+                                        u16::from_str_radix(s, 16)
+                                            .expect("Parser returned non-hex bytes?"),
+                                    )
+                                },
+                            ),
+                            map(valid_word, |w| OperandType::Label(w.to_owned())),
+                        )),
+                        Self::Absolute,
                     ),
-                    // TODO from_str_radix should be safe since we parse for hex digits. Maybe implement custom error?
-                    |s| {
-                        Self::Absolute(OperandType::Known(
-                            u16::from_str_radix(s, 16).expect("Parser returned non-hex bytes?"),
-                        ))
-                    },
-                ),
-                        map(
-                            preceded(space1, valid_word),
-                            |w| Self::Absolute(OperandType::Label(w.to_owned()))
-                        )
-                ))
-        ),
+                )),
                 |maybe_op| match maybe_op {
                     Some(op) => op,
                     None => Operand::NoOperand,
@@ -52,6 +45,12 @@ impl Operand {
             ),
         )(i)
     }
+}
+
+#[derive(Debug, Eq, PartialEq, strum_macros::Display)]
+pub enum OperandType<T> {
+    Known(T),
+    Label(String),
 }
 
 #[cfg(test)]

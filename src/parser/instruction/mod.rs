@@ -48,6 +48,14 @@ impl Instruction {
             ),
         )(i)
     }
+
+    pub fn instruction_byte(&self) -> u8 {
+        match self {
+            Instruction::StzAbsolute(_) => 0x9C,
+            Instruction::RtsStack => 0x60,
+            Instruction::JmpAbsolute(_) => 0x4C,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -75,7 +83,13 @@ mod tests {
     fn instruction_success_3() {
         let input = "  JMP loop ";
         let result = Instruction::parse(input);
-        assert_eq!(Ok((" ", Instruction::JmpAbsolute(OperandType::Label("loop".to_owned())))), result)
+        assert_eq!(
+            Ok((
+                " ",
+                Instruction::JmpAbsolute(OperandType::Label("loop".to_owned()))
+            )),
+            result
+        )
     }
 
     #[test]

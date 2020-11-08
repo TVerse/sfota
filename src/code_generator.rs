@@ -11,6 +11,7 @@ pub enum Error {}
 enum EmitResult {
     FullyDetermined(Vec<u8>),
     PartiallyUnknown(Instruction),
+    NoBytesRequired,
 }
 
 #[derive(Debug)]
@@ -28,6 +29,28 @@ impl Default for GenerationState {
     }
 }
 
+macro_rules! impl_16bit {
+    ($ot:expr, $instruction:expr, $generation_state:expr) => {{
+        let GenerationState {
+            program_counter,
+            label_locations,
+        } = $generation_state;
+        let instruction_byte = $instruction.instruction_byte();
+        match $ot {
+            OperandType::Known(addr) => known_16bit(instruction_byte, program_counter, *addr),
+            OperandType::Label(l) => match label_locations.get(l) {
+                Some(addr) => known_16bit(instruction_byte, program_counter, *addr),
+                None => {
+                    increment_pc(program_counter, 3);
+                    Ok(EmitResult::PartiallyUnknown($instruction))
+                }
+            },
+        }
+    }};
+}
+
+// TODO the second time around the PC is still being incremented.
+// That's probably fine, since we don't use it to create new labels?
 pub fn generate_code(parsed: Parsed) -> Result<Vec<u8>, Error> {
     dbg!(&parsed);
     let mut generation_state = GenerationState::default();
@@ -43,16 +66,17 @@ pub fn generate_code(parsed: Parsed) -> Result<Vec<u8>, Error> {
                 generation_state
                     .label_locations
                     .insert(l, generation_state.program_counter);
-                Ok(EmitResult::FullyDetermined(vec![])) // TODO pretty wasteful?
+                Ok(EmitResult::NoBytesRequired) // TODO pretty wasteful?
             }
         })
         .collect::<Result<Vec<_>, _>>()
         .and_then(|v| fill_in_states(v.into_iter(), &mut generation_state))
         .map(|ers| {
             ers.into_iter()
-                .map(|er| match er {
-                    EmitResult::FullyDetermined(bytes) => bytes,
+                .filter_map(|er| match er {
+                    EmitResult::FullyDetermined(bytes) => Some(bytes),
                     EmitResult::PartiallyUnknown(_) => panic!("PartiallyUnknown"),
+                    EmitResult::NoBytesRequired => None,
                 })
                 .flatten()
                 .collect::<Vec<u8>>()
@@ -66,10 +90,10 @@ fn fill_in_states<I: Iterator<Item = EmitResult>>(
     generation_state: &mut GenerationState,
 ) -> Result<Vec<EmitResult>, Error> {
     ers.map(|er| match er {
-        EmitResult::FullyDetermined(bytes) => Ok(EmitResult::FullyDetermined(bytes)),
         EmitResult::PartiallyUnknown(instruction) => {
             emit_instruction(instruction, generation_state)
         }
+        other => Ok(other),
     })
     .collect()
 }
@@ -79,72 +103,31 @@ fn emit_instruction(
     generation_state: &mut GenerationState,
 ) -> Result<EmitResult, Error> {
     match &instruction {
-        Instruction::StzAbsolute(ot) => {
-            match ot {
-                OperandType::Known(addr) => {
-                    let [l, h] = addr.to_le_bytes();
-                    let bytes = vec![0x9C, l, h];
-                    generation_state.program_counter = generation_state
-                        .program_counter
-                        .checked_add(bytes.len() as u16)
-                        .expect("Program counter overflow"); // TODO
-                    Ok(EmitResult::FullyDetermined(bytes))
-                }
-                OperandType::Label(l) => {
-                    match generation_state.label_locations.get(l) {
-                        Some(loc) => {
-                            let [l, h] = loc.to_le_bytes();
-                            let bytes = vec![0x9C, l, h];
-                            generation_state.program_counter = generation_state
-                                .program_counter
-                                .checked_add(bytes.len() as u16)
-                                .expect("Program counter overflow"); // TODO
-                            Ok(EmitResult::FullyDetermined(bytes))
-                        }
-                        None => {
-                            generation_state.program_counter = generation_state
-                                .program_counter
-                                .checked_add(3)// TODO
-                                .expect("Program counter overflow"); // TODO
-                            Ok(EmitResult::PartiallyUnknown(instruction))
-                        },
-                    }
-                }
-            }
-        }
+        Instruction::StzAbsolute(ot) => impl_16bit!(ot, instruction, generation_state),
+        Instruction::JmpAbsolute(ot) => impl_16bit!(ot, instruction, generation_state),
         Instruction::RtsStack => Ok(EmitResult::FullyDetermined(vec![0x60])),
-        Instruction::JmpAbsolute(ot) => {
-            match ot {
-                OperandType::Known(addr) => {
-                    let [l, h] = addr.to_le_bytes();
-                    let bytes = vec![0x4C, l, h];
-                    generation_state.program_counter = generation_state
-                        .program_counter
-                        .checked_add(bytes.len() as u16)
-                        .expect("Program counter overflow"); // TODO
-                    Ok(EmitResult::FullyDetermined(bytes))
-                }
-                OperandType::Label(l) => {
-                    match generation_state.label_locations.get(l) {
-                        Some(loc) => {
-                            let [l, h] = loc.to_le_bytes();
-                            let bytes = vec![0x4C, l, h];
-                            generation_state.program_counter = generation_state
-                                .program_counter
-                                .checked_add(bytes.len() as u16)
-                                .expect("Program counter overflow"); // TODO
-                            Ok(EmitResult::FullyDetermined(bytes))
-                        }
-                        None => {
-                            generation_state.program_counter = generation_state
-                                .program_counter
-                                .checked_add(3 as u16)
-                                .expect("Program counter overflow"); // TODO
-                            Ok(EmitResult::PartiallyUnknown(instruction))
-                        },
-                    }
-                }
-            }
-        }
     }
 }
+
+fn increment_pc(program_counter: &mut u16, by: u16) {
+    *program_counter = program_counter
+        .checked_add(by)
+        .expect("Program counter overflow")
+}
+
+fn known_16bit(
+    instruction_byte: u8,
+    program_counter: &mut u16,
+    val: u16,
+) -> Result<EmitResult, Error> {
+    let [l, h] = val.to_le_bytes();
+    let bytes = vec![instruction_byte, l, h];
+    increment_pc(program_counter, 3);
+    Ok(EmitResult::FullyDetermined(bytes))
+}
+
+// fn known_8bit(instruction_byte: u8, program_counter: &mut u16, val: u8) -> Result<EmitResult, Error> {
+//     let bytes = vec![instruction_byte, val];
+//     increment_pc(program_counter, 2);
+//     Ok(EmitResult::FullyDetermined(bytes))
+// }
