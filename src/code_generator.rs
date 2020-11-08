@@ -1,6 +1,7 @@
 use Error::InvalidAddressingMode;
 
 use super::parser::{Element, Line, Operand, Parsed};
+use crate::parser::Instruction;
 
 #[derive(Debug)]
 pub enum Error {
@@ -16,25 +17,14 @@ fn generate_line(line: Line) -> Result<Vec<u8>, Error> {
     line.0
         .into_iter()
         .map(|element| match element {
-            Element::Instruction(_instruction) => Ok(vec![]), // TODO
+            Element::Instruction(instruction) => match instruction {
+                Instruction::StzAbsolute(addr) => {
+                    let [l, h] = addr.to_le_bytes();
+                    Ok(vec![0x9C, l, h])
+                },
+                Instruction::RtsStack => Ok(vec![0x60])
+            },
         })
         .collect::<Result<Vec<_>, _>>()
         .map(|x| x.into_iter().flatten().collect::<Vec<u8>>())
-}
-
-fn stz(operand: &Operand) -> Result<Vec<u8>, Error> {
-    match operand {
-        Operand::Absolute(od) => {
-            let [l, h] = od.to_le_bytes();
-            Ok(vec![0x9C, l, h])
-        }
-        Operand::NoOperand => Err(InvalidAddressingMode("Implied")),
-    }
-}
-
-fn rts(operand: Operand) -> Result<Vec<u8>, Error> {
-    match operand {
-        Operand::Absolute(_) => Err(InvalidAddressingMode("Absolute")),
-        Operand::NoOperand => Ok(vec![0x60]),
-    }
 }
