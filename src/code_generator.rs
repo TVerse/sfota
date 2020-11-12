@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::parser::{Instruction, OperandType};
+use crate::parser::{Instruction, OperandExpression};
 
 use super::parser::{Element, Parsed};
 
@@ -27,26 +27,6 @@ impl Default for GenerationState {
             label_locations: HashMap::new(),
         }
     }
-}
-
-macro_rules! impl_16bit {
-    ($ot:expr, $instruction:expr, $generation_state:expr) => {{
-        let GenerationState {
-            program_counter,
-            label_locations,
-        } = $generation_state;
-        let instruction_byte = $instruction.instruction_byte();
-        match $ot {
-            OperandType::Known(addr) => known_16bit(instruction_byte, program_counter, *addr),
-            OperandType::Label(l) => match label_locations.get(l) {
-                Some(addr) => known_16bit(instruction_byte, program_counter, *addr),
-                None => {
-                    increment_pc(program_counter, 3);
-                    Ok(EmitResult::PartiallyUnknown($instruction))
-                }
-            },
-        }
-    }};
 }
 
 // TODO the second time around the PC is still being incremented.
@@ -81,7 +61,7 @@ pub fn generate_code(parsed: Parsed) -> Result<Vec<u8>, Error> {
                 .flatten()
                 .collect::<Vec<u8>>()
         });
-    dbg!(generation_state);
+    dbg!(&generation_state);
     res
 }
 
@@ -103,8 +83,44 @@ fn emit_instruction(
     generation_state: &mut GenerationState,
 ) -> Result<EmitResult, Error> {
     match &instruction {
-        Instruction::StzAbsolute(ot) => impl_16bit!(ot, instruction, generation_state),
-        Instruction::JmpAbsolute(ot) => impl_16bit!(ot, instruction, generation_state),
+        Instruction::StzAbsolute(ot) => {
+            let GenerationState {
+                program_counter,
+                label_locations,
+            } = generation_state;
+            let instruction_byte = instruction.instruction_byte();
+            match ot {
+                OperandExpression::Known(addr) => {
+                    known_16bit(instruction_byte, program_counter, *addr)
+                }
+                OperandExpression::Label(l) => match label_locations.get(l) {
+                    Some(addr) => known_16bit(instruction_byte, program_counter, *addr),
+                    None => {
+                        increment_pc(program_counter, 3);
+                        Ok(EmitResult::PartiallyUnknown(instruction))
+                    }
+                },
+            }
+        }
+        Instruction::JmpAbsolute(ot) => {
+            let GenerationState {
+                program_counter,
+                label_locations,
+            } = generation_state;
+            let instruction_byte = instruction.instruction_byte();
+            match ot {
+                OperandExpression::Known(addr) => {
+                    known_16bit(instruction_byte, program_counter, *addr)
+                }
+                OperandExpression::Label(l) => match label_locations.get(l) {
+                    Some(addr) => known_16bit(instruction_byte, program_counter, *addr),
+                    None => {
+                        increment_pc(program_counter, 3);
+                        Ok(EmitResult::PartiallyUnknown(instruction))
+                    }
+                },
+            }
+        }
         Instruction::RtsStack => Ok(EmitResult::FullyDetermined(vec![0x60])),
     }
 }

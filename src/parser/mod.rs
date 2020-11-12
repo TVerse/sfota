@@ -10,7 +10,7 @@ use nom::sequence::{delimited, terminated, tuple};
 use nom::Finish;
 
 use instruction::mnemonic::Mnemonic;
-pub use instruction::operand::{Operand, OperandType};
+pub use instruction::operand::{Operand, OperandExpression};
 pub use instruction::Instruction;
 
 mod instruction;
@@ -34,6 +34,7 @@ impl<'a> Error<Input<'a>> {
                 ErrorKind::Context(ctx) => format!("in {}", ctx),
                 ErrorKind::UndefinedMnemonic(m) => format!("undefined mnemonic \"{}\"", m),
                 ErrorKind::InvalidAddressingMode(m, o) => format!("invalid mode: {}, {}", m, o),
+                ErrorKind::OperandTooLong(n) => format!("operand too long: {}", n),
             };
 
             // TODO better way to do line numbering
@@ -90,6 +91,7 @@ pub enum ErrorKind {
     // TODO should not be necessary here? Depends on if we require macros to be defined before use
     InvalidAddressingMode(Mnemonic, Operand),
     UndefinedMnemonic(String),
+    OperandTooLong(u16),
 }
 
 fn take_until_newline(input: &str) -> String {
@@ -210,7 +212,7 @@ mod tests {
         assert_eq!(
             Ok((
                 "; ",
-                Element::Instruction(Instruction::StzAbsolute(OperandType::Known(0x0300)))
+                Element::Instruction(Instruction::StzAbsolute(OperandExpression::Known(0x0300)))
             )),
             result
         )
@@ -239,7 +241,7 @@ mod tests {
         let result = parse(input);
         assert_eq!(
             Ok(Parsed(vec![
-                Element::Instruction(Instruction::StzAbsolute(OperandType::Known(0x300))),
+                Element::Instruction(Instruction::StzAbsolute(OperandExpression::Known(0x300))),
                 Element::Instruction(Instruction::RtsStack),
             ])),
             result
@@ -252,7 +254,7 @@ mod tests {
         let result = parse(input);
         assert_eq!(
             Ok(Parsed(vec![
-                Element::Instruction(Instruction::StzAbsolute(OperandType::Known(0x300))),
+                Element::Instruction(Instruction::StzAbsolute(OperandExpression::Known(0x300))),
                 Element::Instruction(Instruction::RtsStack),
             ])),
             result

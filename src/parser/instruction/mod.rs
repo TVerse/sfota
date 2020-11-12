@@ -5,7 +5,7 @@ use nom::sequence::{preceded, tuple};
 
 use mnemonic::Mnemonic;
 use operand::Operand;
-use operand::OperandType;
+use operand::OperandExpression;
 
 use super::{Error, ErrorKind, IResult, Input};
 
@@ -27,9 +27,9 @@ impl<'a> FromExternalError<Input<'a>, InvalidAddressingMode> for Error<Input<'a>
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum Instruction {
-    StzAbsolute(OperandType<u16>),
+    StzAbsolute(OperandExpression<u16>),
     RtsStack,
-    JmpAbsolute(OperandType<u16>),
+    JmpAbsolute(OperandExpression<u16>),
 }
 
 impl Instruction {
@@ -67,7 +67,10 @@ mod tests {
         let input = "  STZ $0300; ";
         let result = Instruction::parse(input);
         assert_eq!(
-            Ok(("; ", Instruction::StzAbsolute(OperandType::Known(0x0300)))),
+            Ok((
+                "; ",
+                Instruction::StzAbsolute(OperandExpression::Known(0x0300))
+            )),
             result
         )
     }
@@ -86,7 +89,7 @@ mod tests {
         assert_eq!(
             Ok((
                 " ",
-                Instruction::JmpAbsolute(OperandType::Label("loop".to_owned()))
+                Instruction::JmpAbsolute(OperandExpression::Label("loop".to_owned()))
             )),
             result
         )

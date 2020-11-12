@@ -1,4 +1,5 @@
-#Sfota
+Sfota
+-----
 
 Six-five-oh-two assembler library.
 
@@ -41,3 +42,22 @@ interesting_line = (label|nonempty_space) instruction? space? comment?
 
 line = (interesting_line | newline)
 ```
+
+## TODOs
+
+### How to implement ZP labels?
+
+Easy solution first: only use ZP addressing when it's already known in the parser that it'll fit.
+(So effectively only when using numbers as operands, not labels)
+
+But:
+Otherwise iterate code gen until fixpoint? Is that guaranteed to exist?
+Create syntactic difference? Square brackets maybe?
+IDEA:
+Use ZP when:
+* possible (8bit in ambiguous circumstances)
+* required with (zp),Y
+* forced using [] (would also force labels). (So \[(zp,X)\] is legal now?
+Fixpoint might exist... so then decide ZP or non-ZP at code generation if label fits?
+
+VASM can mark certain symbols as ZP and optimize based on that...
