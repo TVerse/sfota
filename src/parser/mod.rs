@@ -10,7 +10,7 @@ use nom::sequence::{delimited, terminated, tuple};
 use nom::Finish;
 
 use instruction::mnemonic::Mnemonic;
-pub use instruction::operand::{Operand, OperandExpression};
+pub use instruction::operand::{AddressingMode, OperandExpression};
 pub use instruction::Instruction;
 
 mod instruction;
@@ -89,9 +89,9 @@ pub enum ErrorKind {
     Nom(NomErrorKind),
     Context(&'static str),
     // TODO should not be necessary here? Depends on if we require macros to be defined before use
-    InvalidAddressingMode(Mnemonic, Operand),
+    InvalidAddressingMode(Mnemonic, AddressingMode),
     UndefinedMnemonic(String),
-    OperandTooLong(u16),
+    OperandTooLong(OperandExpression<u16>),
 }
 
 fn take_until_newline(input: &str) -> String {

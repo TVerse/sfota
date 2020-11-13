@@ -1,13 +1,14 @@
 use nom::branch::alt;
 use nom::bytes::complete::{tag, take};
-use nom::character::complete::{hex_digit1, space1};
-use nom::combinator::{map, map_parser, map_res, opt, success};
+use nom::character::complete::{hex_digit1, space0, space1};
+use nom::combinator::{map, map_parser, map_res, success};
 use nom::error::{context, ErrorKind as NomErrorKind, FromExternalError};
-use nom::sequence::{delimited, preceded};
+use nom::sequence::{delimited, preceded, terminated, tuple};
 
 use crate::parser::{valid_word, Error, ErrorKind, IResult, Input};
+use either::Either;
 
-struct OperandTooLong(u16);
+struct OperandTooLong(OperandExpression<u16>);
 
 impl<'a> FromExternalError<Input<'a>, OperandTooLong> for Error<Input<'a>> {
     fn from_external_error(input: &'a str, kind: NomErrorKind, e: OperandTooLong) -> Self {
@@ -21,7 +22,7 @@ impl<'a> FromExternalError<Input<'a>, OperandTooLong> for Error<Input<'a>> {
 }
 
 #[derive(Debug, Eq, PartialEq, strum_macros::Display, Clone)]
-pub enum Operand {
+pub enum AddressingMode {
     Absolute(OperandExpression<u16>),
     AbsoluteIndexedIndirect(OperandExpression<u16>),
     AbsoluteIndexedX(OperandExpression<u16>),
@@ -37,54 +38,106 @@ pub enum Operand {
     NoOperand,
 }
 
-impl Operand {
+impl AddressingMode {
     pub fn parse(i: Input) -> IResult<Self> {
         dbg!(i);
         context(
-            "Operand",
+            "AddressingMode",
             alt((
                 preceded(
                     space1,
                     alt((
                         Self::immediate,
+                        Self::indexed_x,
+                        Self::indexed_y,
+                        Self::indirect_indexed_y,
+                        Self::indexed_indirect,
                         Self::indirect,
-                        map(Number::parse, |r| match r {
-                            Number::N8b(n) => Operand::ZeroPage(OperandExpression::Known(n)),
-                            Number::N16b(n) => Operand::Absolute(OperandExpression::Known(n)),
-                        }),
-                        map(valid_word, |w| {
-                            Operand::Absolute(OperandExpression::Label(w.to_owned()))
-                        }),
+                        Self::absolute,
                     )),
                 ),
-                success(Operand::NoOperand),
+                success(AddressingMode::NoOperand),
             )),
         )(i)
     }
 
     fn immediate(i: Input) -> IResult<Self> {
-        map_res(preceded(tag("#"), Number::parse), |r| match r {
-            Number::N8b(n) => Ok(Operand::Immediate(OperandExpression::Known(n))),
-            Number::N16b(n) => Err(OperandTooLong(n)),
+        map_res(preceded(tag("#"), parse_operand_expression), |r| match r {
+            Either::Left(oe) => Ok(AddressingMode::Immediate(oe)),
+            Either::Right(oe) => Err(OperandTooLong(oe)),
         })(i)
     }
 
     fn indirect(i: Input) -> IResult<Self> {
-        map(delimited(tag("("), Number::parse, tag(")")), |r| match r {
-            Number::N8b(n) => Operand::ZeroPageIndirect(OperandExpression::Known(n)),
-            Number::N16b(n) => Operand::AbsoluteIndirect(OperandExpression::Known(n)),
+        map(
+            delimited(tag("("), parse_operand_expression, tag(")")),
+            |r| match r {
+                Either::Left(oe) => AddressingMode::ZeroPageIndirect(oe),
+                Either::Right(oe) => AddressingMode::AbsoluteIndirect(oe),
+            },
+        )(i)
+    }
+
+    fn indexed_indirect(i: Input) -> IResult<Self> {
+        map(
+            delimited(
+                tag("("),
+                parse_operand_expression,
+                tuple((tag(","), space0, tag("X"), tag(")"))),
+            ),
+            |r| match r {
+                Either::Left(oe) => AddressingMode::ZeroPageIndexedIndirect(oe),
+                Either::Right(oe) => AddressingMode::AbsoluteIndexedIndirect(oe),
+            },
+        )(i)
+    }
+
+    fn absolute(i: Input) -> IResult<Self> {
+        map(parse_operand_expression, |r| match r {
+            Either::Left(oe) => AddressingMode::ZeroPage(oe),
+            Either::Right(oe) => AddressingMode::Absolute(oe),
         })(i)
     }
-}
 
-enum OperandType {
-    Abs,
-    IndexedIndirect,
-    IndexedX,
-    IndexedY,
-    Indirect,
-    IndirectIndexedY,
-    Immediate,
+    fn indexed_x(i: Input) -> IResult<Self> {
+        map(
+            terminated(
+                parse_operand_expression,
+                tuple((tag(","), space0, tag("Y"))),
+            ),
+            |r| match r {
+                Either::Left(oe) => AddressingMode::ZeroPageIndexedY(oe),
+                Either::Right(oe) => AddressingMode::AbsoluteIndexedY(oe),
+            },
+        )(i)
+    }
+
+    fn indexed_y(i: Input) -> IResult<Self> {
+        map(
+            terminated(
+                parse_operand_expression,
+                tuple((tag(","), space0, tag("X"))),
+            ),
+            |r| match r {
+                Either::Left(oe) => AddressingMode::ZeroPageIndexedX(oe),
+                Either::Right(oe) => AddressingMode::AbsoluteIndexedX(oe),
+            },
+        )(i)
+    }
+
+    fn indirect_indexed_y(i: Input) -> IResult<Self> {
+        map_res(
+            delimited(
+                tag("("),
+                parse_operand_expression,
+                tuple((tag(")"), tag(","), space0, tag("Y"))),
+            ),
+            |r| match r {
+                Either::Left(oe) => Ok(AddressingMode::ZeroPageIndirectIndexedY(oe)),
+                Either::Right(oe) => Err(OperandTooLong(oe)),
+            },
+        )(i)
+    }
 }
 
 enum Number {
@@ -125,6 +178,24 @@ pub enum OperandExpression<T> {
     Label(String),
 }
 
+// TODO any way to get this inside the impl block?
+fn parse_operand_expression(
+    i: Input,
+) -> IResult<Either<OperandExpression<u8>, OperandExpression<u16>>> {
+    context(
+        "OperandExpression",
+        alt((
+            map(valid_word, |l| {
+                Either::Right(OperandExpression::Label(l.to_owned()))
+            }),
+            map(Number::parse, |r| match r {
+                Number::N8b(n) => Either::Left(OperandExpression::Known(n)),
+                Number::N16b(n) => Either::Right(OperandExpression::Known(n)),
+            }),
+        )),
+    )(i)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -132,9 +203,12 @@ mod tests {
     #[test]
     fn absolute_success_1() {
         let input = " $1234; ";
-        let result = Operand::parse(input);
+        let result = AddressingMode::parse(input);
         assert_eq!(
-            Ok(("; ", Operand::Absolute(OperandExpression::Known(0x1234)))),
+            Ok((
+                "; ",
+                AddressingMode::Absolute(OperandExpression::Known(0x1234))
+            )),
             result
         )
     }
@@ -142,9 +216,12 @@ mod tests {
     #[test]
     fn absolute_success_2() {
         let input = " $12; ";
-        let result = Operand::parse(input);
+        let result = AddressingMode::parse(input);
         assert_eq!(
-            Ok(("; ", Operand::ZeroPage(OperandExpression::Known(0x12)))),
+            Ok((
+                "; ",
+                AddressingMode::ZeroPage(OperandExpression::Known(0x12))
+            )),
             result
         )
     }
@@ -152,24 +229,24 @@ mod tests {
     #[test]
     fn absolute_miss() {
         let input = "90aB; ";
-        let result = Operand::parse(input);
+        let result = AddressingMode::parse(input);
         dbg!(&result);
-        assert_eq!(Ok((input, Operand::NoOperand)), result); // TODO is this good?
+        assert_eq!(Ok((input, AddressingMode::NoOperand)), result); // TODO is this good?
 
         let input = "$90a; ";
-        let result = Operand::parse(input);
+        let result = AddressingMode::parse(input);
         dbg!(&result);
-        assert_eq!(Ok((input, Operand::NoOperand)), result); // TODO is this good?
+        assert_eq!(Ok((input, AddressingMode::NoOperand)), result); // TODO is this good?
     }
 
     #[test]
     fn label_success() {
         let input = " loop; ";
-        let result = Operand::parse(input);
+        let result = AddressingMode::parse(input);
         assert_eq!(
             Ok((
                 "; ",
-                Operand::Absolute(OperandExpression::Label("loop".to_owned()))
+                AddressingMode::Absolute(OperandExpression::Label("loop".to_owned()))
             )),
             result
         )
@@ -178,11 +255,11 @@ mod tests {
     #[test]
     fn absolute_indirect_indexed_success() {
         let input = " ($1234, X); ";
-        let result = Operand::parse(input);
+        let result = AddressingMode::parse(input);
         assert_eq!(
             Ok((
                 "; ",
-                Operand::AbsoluteIndexedIndirect(OperandExpression::Known(0x1234))
+                AddressingMode::AbsoluteIndexedIndirect(OperandExpression::Known(0x1234))
             )),
             result
         )
@@ -191,11 +268,11 @@ mod tests {
     #[test]
     fn absolute_indexed_x_success() {
         let input = " $1234, X";
-        let result = Operand::parse(input);
+        let result = AddressingMode::parse(input);
         assert_eq!(
             Ok((
                 "",
-                Operand::AbsoluteIndexedX(OperandExpression::Known(0x1234))
+                AddressingMode::AbsoluteIndexedX(OperandExpression::Known(0x1234))
             )),
             result
         )
@@ -204,11 +281,11 @@ mod tests {
     #[test]
     fn absolute_indexed_y_success() {
         let input = " $1234, Y";
-        let result = Operand::parse(input);
+        let result = AddressingMode::parse(input);
         assert_eq!(
             Ok((
                 "",
-                Operand::AbsoluteIndexedY(OperandExpression::Known(0x1234))
+                AddressingMode::AbsoluteIndexedY(OperandExpression::Known(0x1234))
             )),
             result
         )
@@ -217,11 +294,11 @@ mod tests {
     #[test]
     fn absolute_indirect_success() {
         let input = " (indirect)\n";
-        let result = Operand::parse(input);
+        let result = AddressingMode::parse(input);
         assert_eq!(
             Ok((
                 "\n",
-                Operand::AbsoluteIndirect(OperandExpression::Label("indirect".to_owned()))
+                AddressingMode::AbsoluteIndirect(OperandExpression::Label("indirect".to_owned()))
             )),
             result
         )
@@ -230,9 +307,12 @@ mod tests {
     #[test]
     fn immediate_success() {
         let input = " #$12\n";
-        let result = Operand::parse(input);
+        let result = AddressingMode::parse(input);
         assert_eq!(
-            Ok(("\n", Operand::Immediate(OperandExpression::Known(0x12)))),
+            Ok((
+                "\n",
+                AddressingMode::Immediate(OperandExpression::Known(0x12))
+            )),
             result
         )
     }
@@ -240,9 +320,12 @@ mod tests {
     #[test]
     fn zero_page_success() {
         let input = " $12; ";
-        let result = Operand::parse(input);
+        let result = AddressingMode::parse(input);
         assert_eq!(
-            Ok(("; ", Operand::ZeroPage(OperandExpression::Known(0x12)))),
+            Ok((
+                "; ",
+                AddressingMode::ZeroPage(OperandExpression::Known(0x12))
+            )),
             result
         )
     }
@@ -250,11 +333,11 @@ mod tests {
     #[test]
     fn zero_page_indirect_indexed_success() {
         let input = " ($12, X); ";
-        let result = Operand::parse(input);
+        let result = AddressingMode::parse(input);
         assert_eq!(
             Ok((
                 "; ",
-                Operand::ZeroPageIndexedIndirect(OperandExpression::Known(0x12))
+                AddressingMode::ZeroPageIndexedIndirect(OperandExpression::Known(0x12))
             )),
             result
         )
@@ -263,11 +346,11 @@ mod tests {
     #[test]
     fn zero_page_indexed_x_success() {
         let input = " $12, X";
-        let result = Operand::parse(input);
+        let result = AddressingMode::parse(input);
         assert_eq!(
             Ok((
                 "",
-                Operand::ZeroPageIndexedX(OperandExpression::Known(0x12))
+                AddressingMode::ZeroPageIndexedX(OperandExpression::Known(0x12))
             )),
             result
         )
@@ -275,12 +358,12 @@ mod tests {
 
     #[test]
     fn zero_page_indexed_y_success() {
-        let input = " $12, Y";
-        let result = Operand::parse(input);
+        let input = " $12,Y";
+        let result = AddressingMode::parse(input);
         assert_eq!(
             Ok((
                 "",
-                Operand::ZeroPageIndexedY(OperandExpression::Known(0x12))
+                AddressingMode::ZeroPageIndexedY(OperandExpression::Known(0x12))
             )),
             result
         )
@@ -289,11 +372,24 @@ mod tests {
     #[test]
     fn zero_page_indirect_success() {
         let input = " ($12)\n";
-        let result = Operand::parse(input);
+        let result = AddressingMode::parse(input);
         assert_eq!(
             Ok((
                 "\n",
-                Operand::ZeroPageIndirect(OperandExpression::Known(0x12))
+                AddressingMode::ZeroPageIndirect(OperandExpression::Known(0x12))
+            )),
+            result
+        )
+    }
+
+    #[test]
+    fn zero_page_indirect_indexed_y_success() {
+        let input = " ($12), Y\n";
+        let result = AddressingMode::parse(input);
+        assert_eq!(
+            Ok((
+                "\n",
+                AddressingMode::ZeroPageIndirectIndexedY(OperandExpression::Known(0x12))
             )),
             result
         )
