@@ -4,15 +4,15 @@ use nom::error::{context, ErrorKind as NomErrorKind, FromExternalError};
 use nom::sequence::{preceded, tuple};
 
 use mnemonic::Mnemonic;
-use operand::Operand;
-use operand::OperandType;
+use operand::AddressingMode;
+use operand::OperandExpression;
 
 use super::{Error, ErrorKind, IResult, Input};
 
 pub mod mnemonic;
 pub mod operand;
 
-struct InvalidAddressingMode(Mnemonic, Operand);
+struct InvalidAddressingMode(Mnemonic, AddressingMode);
 
 impl<'a> FromExternalError<Input<'a>, InvalidAddressingMode> for Error<Input<'a>> {
     fn from_external_error(input: Input<'a>, kind: NomErrorKind, e: InvalidAddressingMode) -> Self {
@@ -27,9 +27,9 @@ impl<'a> FromExternalError<Input<'a>, InvalidAddressingMode> for Error<Input<'a>
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum Instruction {
-    StzAbsolute(OperandType<u16>),
+    StzAbsolute(OperandExpression<u16>),
     RtsStack,
-    JmpAbsolute(OperandType<u16>),
+    JmpAbsolute(OperandExpression<u16>),
 }
 
 impl Instruction {
@@ -38,11 +38,11 @@ impl Instruction {
         context(
             "Instruction",
             map_res(
-                preceded(space1, tuple((Mnemonic::parse, Operand::parse))),
+                preceded(space1, tuple((Mnemonic::parse, AddressingMode::parse))),
                 |(mnemonic, operand)| match (mnemonic, operand) {
-                    (Mnemonic::STZ, Operand::Absolute(a)) => Ok(StzAbsolute(a)),
-                    (Mnemonic::RTS, Operand::NoOperand) => Ok(RtsStack),
-                    (Mnemonic::JMP, Operand::Absolute(a)) => Ok(JmpAbsolute(a)),
+                    (Mnemonic::STZ, AddressingMode::Absolute(a)) => Ok(StzAbsolute(a)),
+                    (Mnemonic::RTS, AddressingMode::NoOperand) => Ok(RtsStack),
+                    (Mnemonic::JMP, AddressingMode::Absolute(a)) => Ok(JmpAbsolute(a)),
                     (mnemonic, operand) => Err(InvalidAddressingMode(mnemonic, operand)),
                 },
             ),
@@ -67,7 +67,10 @@ mod tests {
         let input = "  STZ $0300; ";
         let result = Instruction::parse(input);
         assert_eq!(
-            Ok(("; ", Instruction::StzAbsolute(OperandType::Known(0x0300)))),
+            Ok((
+                "; ",
+                Instruction::StzAbsolute(OperandExpression::Known(0x0300))
+            )),
             result
         )
     }
@@ -86,7 +89,7 @@ mod tests {
         assert_eq!(
             Ok((
                 " ",
-                Instruction::JmpAbsolute(OperandType::Label("loop".to_owned()))
+                Instruction::JmpAbsolute(OperandExpression::Label("loop".to_owned()))
             )),
             result
         )
