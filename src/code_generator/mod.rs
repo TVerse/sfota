@@ -1,11 +1,15 @@
 use std::collections::HashMap;
 
-use crate::parser::{Instruction, OperandExpression};
+use crate::parser::{AddressingMode, Instruction};
 
 use super::parser::{Element, Parsed};
 use crate::code_generator::lookup_tables::lookup;
 
+use crate::parser::operand_expression::OperandExpression;
+
 mod lookup_tables;
+
+type Labels = HashMap<String, u16>;
 
 struct OperandTooLong(OperandExpression);
 
@@ -21,10 +25,33 @@ enum EmitResult {
     NoBytesRequired,
 }
 
+pub enum Target {
+    ZeroBytes,
+    OneByte(u8),
+    TwoByte(u16),
+}
+
+impl Target {
+    fn resolve_from(addressing_mode: &AddressingMode, _labels: &Labels) -> Option<Target> {
+        match addressing_mode {
+            AddressingMode::Immediate(_oe) => {}
+            AddressingMode::IndexedX(_oe) => {}
+            AddressingMode::IndexedY(_oe) => {}
+            AddressingMode::IndirectIndexedY(_oe) => {}
+            AddressingMode::IndexedIndirectX(_oe) => {}
+            AddressingMode::Indirect(_oe) => {}
+            AddressingMode::AbsoluteOrRelative(_oe) => {}
+            AddressingMode::NoOperand => {}
+        }
+
+        todo!()
+    }
+}
+
 #[derive(Debug)]
 struct GenerationState {
     program_counter: u16,
-    label_locations: HashMap<String, u16>,
+    label_locations: Labels,
 }
 
 impl Default for GenerationState {
@@ -100,10 +127,14 @@ fn emit_instruction(
 
 fn handle_instruction(
     instruction: &Instruction,
-    label_locations: &HashMap<String, u16>,
+    label_locations: &Labels,
 ) -> Result<(EmitResult, u16), Error> {
-    let (instruction_byte, maybe_oe) = lookup(instruction)?;
-    let mut result = vec![instruction_byte as u8];
+    let Instruction {
+        mnemonic,
+        addressing_mode,
+    } = instruction;
+    let target = Target::resolve_from(addressing_mode, label_locations);
+    let _result = lookup(mnemonic, &target.unwrap())?;
 
     todo!()
 }

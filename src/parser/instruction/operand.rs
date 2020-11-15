@@ -1,11 +1,12 @@
 use nom::branch::alt;
-use nom::bytes::complete::{tag, take};
-use nom::character::complete::{hex_digit1, space0, space1};
-use nom::combinator::{map, map_parser, success};
+use nom::bytes::complete::tag;
+use nom::character::complete::{space0, space1};
+use nom::combinator::{map, success};
 use nom::error::context;
 use nom::sequence::{delimited, preceded, terminated, tuple};
 
-use crate::parser::{valid_word, IResult, Input};
+use crate::parser::operand_expression::OperandExpression;
+use crate::parser::{IResult, Input};
 
 #[derive(Debug, Eq, PartialEq, strum_macros::Display, Clone)]
 pub enum AddressingMode {
@@ -44,7 +45,7 @@ impl AddressingMode {
 
     fn immediate(i: Input) -> IResult<Self> {
         map(
-            preceded(tag("#"), OperandExpression::parse_operand_expression),
+            preceded(tag("#"), OperandExpression::parse),
             AddressingMode::Immediate,
         )(i)
     }
@@ -53,7 +54,7 @@ impl AddressingMode {
         map(
             delimited(
                 tag("("),
-                OperandExpression::parse_operand_expression,
+                OperandExpression::parse,
                 tag(")"),
             ),
             AddressingMode::Indirect,
@@ -64,7 +65,7 @@ impl AddressingMode {
         map(
             delimited(
                 tag("("),
-                OperandExpression::parse_operand_expression,
+                OperandExpression::parse,
                 tuple((tag(","), space0, tag("X"), tag(")"))),
             ),
             AddressingMode::IndexedIndirectX,
@@ -73,7 +74,7 @@ impl AddressingMode {
 
     fn absolute_or_relative(i: Input) -> IResult<Self> {
         map(
-            OperandExpression::parse_operand_expression,
+            OperandExpression::parse,
             AddressingMode::AbsoluteOrRelative,
         )(i)
     }
@@ -81,7 +82,7 @@ impl AddressingMode {
     fn indexed_x(i: Input) -> IResult<Self> {
         map(
             terminated(
-                OperandExpression::parse_operand_expression,
+                OperandExpression::parse,
                 tuple((tag(","), space0, tag("Y"))),
             ),
             AddressingMode::IndexedY,
@@ -91,7 +92,7 @@ impl AddressingMode {
     fn indexed_y(i: Input) -> IResult<Self> {
         map(
             terminated(
-                OperandExpression::parse_operand_expression,
+                OperandExpression::parse,
                 tuple((tag(","), space0, tag("X"))),
             ),
             AddressingMode::IndexedX,
@@ -102,64 +103,10 @@ impl AddressingMode {
         map(
             delimited(
                 tag("("),
-                OperandExpression::parse_operand_expression,
+                OperandExpression::parse,
                 tuple((tag(")"), tag(","), space0, tag("Y"))),
             ),
             AddressingMode::IndirectIndexedY,
-        )(i)
-    }
-}
-
-enum Number {
-    N8b(u8),
-    N16b(u16),
-}
-
-impl Number {
-    // TODO custom exception
-    fn parse(i: Input) -> IResult<Self> {
-        context("Number", Self::hex_number)(i)
-    }
-
-    fn hex_number(i: Input) -> IResult<Self> {
-        preceded(tag("$"), alt((Number::parse_16bit, Number::parse_8bit)))(i)
-    }
-
-    fn parse_8bit(i: Input) -> IResult<Self> {
-        map(
-            map_parser(hex_digit1, take(2usize)),
-            // TODO from_str_radix should be safe since we parse for hex digits. Maybe implement custom error?
-            |s| Number::N8b(u8::from_str_radix(s, 16).expect("Parser returned non-hex bytes?")),
-        )(i)
-    }
-
-    fn parse_16bit(i: Input) -> IResult<Self> {
-        map(
-            map_parser(hex_digit1, take(4usize)),
-            // TODO from_str_radix should be safe since we parse for hex digits. Maybe implement custom error?
-            |s| Number::N16b(u16::from_str_radix(s, 16).expect("Parser returned non-hex bytes?")),
-        )(i)
-    }
-}
-
-#[derive(Debug, Eq, PartialEq, strum_macros::Display, Clone)]
-pub enum OperandExpression {
-    Known(u16),
-    Label(String),
-}
-
-impl OperandExpression {
-    // TODO any way to get this inside the impl block?
-    fn parse_operand_expression(i: Input) -> IResult<Self> {
-        context(
-            "OperandExpression",
-            alt((
-                map(valid_word, |l| OperandExpression::Label(l.to_owned())),
-                map(Number::parse, |r| match r {
-                    Number::N8b(n) => Self::Known(n as u16), // TODO
-                    Number::N16b(n) => Self::Known(n),
-                }),
-            )),
         )(i)
     }
 }

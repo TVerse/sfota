@@ -1,18 +1,16 @@
 use nom::character::complete::space1;
 use nom::combinator::map;
-use nom::error::{context, ErrorKind as NomErrorKind, FromExternalError};
+use nom::error::context;
 use nom::sequence::{preceded, tuple};
 
 use mnemonic::Mnemonic;
 use operand::AddressingMode;
 
-use super::{Error, ErrorKind, IResult, Input};
+use super::{IResult, Input};
 
 pub mod mnemonic;
 pub mod operand;
 
-// TODO
-// this is very nice for code gen, but it makes it possible to pair up InstructionBytes and OperandExpressions wrong.
 #[derive(Debug, Eq, PartialEq)]
 pub struct Instruction {
     pub mnemonic: Mnemonic,
@@ -25,11 +23,10 @@ impl Instruction {
             "Instruction",
             map(
                 preceded(space1, tuple((Mnemonic::parse, AddressingMode::parse))),
-                |(mnemonic, addressing_mode)|
-                    Instruction {
-                        mnemonic,
-                        addressing_mode,
-                    }
+                |(mnemonic, addressing_mode)| Instruction {
+                    mnemonic,
+                    addressing_mode,
+                },
             ),
         )(i)
     }
@@ -38,7 +35,7 @@ impl Instruction {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use operand::OperandExpression;
+    use crate::parser::operand_expression::OperandExpression;
 
     #[test]
     fn instruction_success_1() {
@@ -49,7 +46,9 @@ mod tests {
                 "; ",
                 Instruction {
                     mnemonic: Mnemonic::STZ,
-                    addressing_mode: AddressingMode::AbsoluteOrRelative(OperandExpression::Known(0x300))
+                    addressing_mode: AddressingMode::AbsoluteOrRelative(OperandExpression::Known(
+                        0x300
+                    ))
                 }
             )),
             result
@@ -61,12 +60,15 @@ mod tests {
         let input = "  RTS ";
         let result = Instruction::parse(input);
         assert_eq!(
-            Ok((" ", Instruction {
-                mnemonic: Mnemonic::RTS,
-                addressing_mode: AddressingMode::NoOperand
-            }
-        )),
-            result)
+            Ok((
+                " ",
+                Instruction {
+                    mnemonic: Mnemonic::RTS,
+                    addressing_mode: AddressingMode::NoOperand
+                }
+            )),
+            result
+        )
     }
 
     #[test]
@@ -78,7 +80,9 @@ mod tests {
                 " ",
                 Instruction {
                     mnemonic: Mnemonic::JMP,
-                    addressing_mode: AddressingMode::AbsoluteOrRelative(OperandExpression::Label("loop".to_owned()))
+                    addressing_mode: AddressingMode::AbsoluteOrRelative(OperandExpression::Label(
+                        "loop".to_owned()
+                    ))
                 }
             )),
             result
