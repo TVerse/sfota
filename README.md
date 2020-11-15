@@ -47,8 +47,10 @@ line = (interesting_line | newline)
 
 ### How to implement ZP labels?
 
-Easy solution first: only use ZP addressing when it's already known in the parser that it'll fit.
-(So effectively only when using numbers as operands, not labels)
+Easy solution first: only use ZP addressing when (using short numeric operands, never labels).
+
+Probably later: use ZP for symbols marked as ZP, error if they are too big.
+To be handled during code generation with the expression expander.
 
 But:
 Otherwise iterate code gen until fixpoint? Is that guaranteed to exist?

@@ -1,66 +1,41 @@
 use nom::character::complete::space1;
-use nom::combinator::map_res;
-use nom::error::{context, ErrorKind as NomErrorKind, FromExternalError};
+use nom::combinator::map;
+use nom::error::context;
 use nom::sequence::{preceded, tuple};
 
 use mnemonic::Mnemonic;
 use operand::AddressingMode;
-use operand::OperandExpression;
 
-use super::{Error, ErrorKind, IResult, Input};
+use super::{IResult, Input};
 
 pub mod mnemonic;
 pub mod operand;
 
-struct InvalidAddressingMode(Mnemonic, AddressingMode);
-
-impl<'a> FromExternalError<Input<'a>, InvalidAddressingMode> for Error<Input<'a>> {
-    fn from_external_error(input: Input<'a>, kind: NomErrorKind, e: InvalidAddressingMode) -> Self {
-        Error {
-            errors: vec![
-                (input, ErrorKind::Nom(kind)),
-                (input, ErrorKind::InvalidAddressingMode(e.0, e.1)),
-            ],
-        }
-    }
-}
-
 #[derive(Debug, Eq, PartialEq)]
-pub enum Instruction {
-    StzAbsolute(OperandExpression<u16>),
-    RtsStack,
-    JmpAbsolute(OperandExpression<u16>),
+pub struct Instruction {
+    pub mnemonic: Mnemonic,
+    pub addressing_mode: AddressingMode,
 }
 
 impl Instruction {
     pub fn parse(i: Input) -> IResult<Self> {
-        use Instruction::*;
         context(
             "Instruction",
-            map_res(
+            map(
                 preceded(space1, tuple((Mnemonic::parse, AddressingMode::parse))),
-                |(mnemonic, operand)| match (mnemonic, operand) {
-                    (Mnemonic::STZ, AddressingMode::Absolute(a)) => Ok(StzAbsolute(a)),
-                    (Mnemonic::RTS, AddressingMode::NoOperand) => Ok(RtsStack),
-                    (Mnemonic::JMP, AddressingMode::Absolute(a)) => Ok(JmpAbsolute(a)),
-                    (mnemonic, operand) => Err(InvalidAddressingMode(mnemonic, operand)),
+                |(mnemonic, addressing_mode)| Instruction {
+                    mnemonic,
+                    addressing_mode,
                 },
             ),
         )(i)
-    }
-
-    pub fn instruction_byte(&self) -> u8 {
-        match self {
-            Instruction::StzAbsolute(_) => 0x9C,
-            Instruction::RtsStack => 0x60,
-            Instruction::JmpAbsolute(_) => 0x4C,
-        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::parser::operand_expression::OperandExpression;
 
     #[test]
     fn instruction_success_1() {
@@ -69,7 +44,12 @@ mod tests {
         assert_eq!(
             Ok((
                 "; ",
-                Instruction::StzAbsolute(OperandExpression::Known(0x0300))
+                Instruction {
+                    mnemonic: Mnemonic::STZ,
+                    addressing_mode: AddressingMode::AbsoluteOrRelative(OperandExpression::Known(
+                        0x300
+                    ))
+                }
             )),
             result
         )
@@ -79,7 +59,16 @@ mod tests {
     fn instruction_success_2() {
         let input = "  RTS ";
         let result = Instruction::parse(input);
-        assert_eq!(Ok((" ", Instruction::RtsStack)), result)
+        assert_eq!(
+            Ok((
+                " ",
+                Instruction {
+                    mnemonic: Mnemonic::RTS,
+                    addressing_mode: AddressingMode::NoOperand
+                }
+            )),
+            result
+        )
     }
 
     #[test]
@@ -89,7 +78,12 @@ mod tests {
         assert_eq!(
             Ok((
                 " ",
-                Instruction::JmpAbsolute(OperandExpression::Label("loop".to_owned()))
+                Instruction {
+                    mnemonic: Mnemonic::JMP,
+                    addressing_mode: AddressingMode::AbsoluteOrRelative(OperandExpression::Label(
+                        "loop".to_owned()
+                    ))
+                }
             )),
             result
         )

@@ -9,11 +9,12 @@ use nom::multi::{many0, many1};
 use nom::sequence::{delimited, terminated, tuple};
 use nom::Finish;
 
-use instruction::mnemonic::Mnemonic;
-pub use instruction::operand::{AddressingMode, OperandExpression};
+pub use instruction::mnemonic::Mnemonic;
+pub use instruction::operand::AddressingMode;
 pub use instruction::Instruction;
 
 mod instruction;
+pub mod operand_expression;
 
 pub type Input<'a> = &'a str;
 pub type Result<'a, T> = std::result::Result<T, Error<Input<'a>>>;
@@ -33,8 +34,6 @@ impl<'a> Error<Input<'a>> {
                 ErrorKind::Nom(err) => format!("nom error {:?}", err),
                 ErrorKind::Context(ctx) => format!("in {}", ctx),
                 ErrorKind::UndefinedMnemonic(m) => format!("undefined mnemonic \"{}\"", m),
-                ErrorKind::InvalidAddressingMode(m, o) => format!("invalid mode: {}, {}", m, o),
-                ErrorKind::OperandTooLong(n) => format!("operand too long: {}", n),
             };
 
             // TODO better way to do line numbering
@@ -89,9 +88,7 @@ pub enum ErrorKind {
     Nom(NomErrorKind),
     Context(&'static str),
     // TODO should not be necessary here? Depends on if we require macros to be defined before use
-    InvalidAddressingMode(Mnemonic, AddressingMode),
     UndefinedMnemonic(String),
-    OperandTooLong(OperandExpression<u16>),
 }
 
 fn take_until_newline(input: &str) -> String {
@@ -169,6 +166,7 @@ fn valid_end(i: Input) -> IResult<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::parser::operand_expression::OperandExpression;
 
     #[test]
     fn valid_start_success() {
@@ -212,7 +210,12 @@ mod tests {
         assert_eq!(
             Ok((
                 "; ",
-                Element::Instruction(Instruction::StzAbsolute(OperandExpression::Known(0x0300)))
+                Element::Instruction(Instruction {
+                    mnemonic: Mnemonic::STZ,
+                    addressing_mode: AddressingMode::AbsoluteOrRelative(OperandExpression::Known(
+                        0x300
+                    ))
+                })
             )),
             result
         )
@@ -223,7 +226,13 @@ mod tests {
         let input = "  RTS ";
         let result = Element::parse(input);
         assert_eq!(
-            Ok((" ", Element::Instruction(Instruction::RtsStack))),
+            Ok((
+                " ",
+                Element::Instruction(Instruction {
+                    mnemonic: Mnemonic::RTS,
+                    addressing_mode: AddressingMode::NoOperand
+                })
+            )),
             result
         )
     }
@@ -241,8 +250,16 @@ mod tests {
         let result = parse(input);
         assert_eq!(
             Ok(Parsed(vec![
-                Element::Instruction(Instruction::StzAbsolute(OperandExpression::Known(0x300))),
-                Element::Instruction(Instruction::RtsStack),
+                Element::Instruction(Instruction {
+                    mnemonic: Mnemonic::STZ,
+                    addressing_mode: AddressingMode::AbsoluteOrRelative(OperandExpression::Known(
+                        0x300
+                    ))
+                }),
+                Element::Instruction(Instruction {
+                    mnemonic: Mnemonic::RTS,
+                    addressing_mode: AddressingMode::NoOperand
+                }),
             ])),
             result
         )
@@ -254,8 +271,16 @@ mod tests {
         let result = parse(input);
         assert_eq!(
             Ok(Parsed(vec![
-                Element::Instruction(Instruction::StzAbsolute(OperandExpression::Known(0x300))),
-                Element::Instruction(Instruction::RtsStack),
+                Element::Instruction(Instruction {
+                    mnemonic: Mnemonic::STZ,
+                    addressing_mode: AddressingMode::AbsoluteOrRelative(OperandExpression::Known(
+                        0x300
+                    ))
+                }),
+                Element::Instruction(Instruction {
+                    mnemonic: Mnemonic::RTS,
+                    addressing_mode: AddressingMode::NoOperand
+                }),
             ])),
             result
         )

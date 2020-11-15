@@ -1,12 +1,23 @@
 use std::collections::HashMap;
 
-use crate::parser::{Instruction, OperandExpression};
+use crate::parser::{AddressingMode, Instruction};
 
 use super::parser::{Element, Parsed};
+use crate::code_generator::lookup_tables::lookup;
+
+use crate::parser::operand_expression::OperandExpression;
+
+mod lookup_tables;
+
+type Labels = HashMap<String, u16>;
+
+struct OperandTooLong(OperandExpression);
 
 // TODO multiple errors?
 #[derive(Debug)]
-pub enum Error {}
+pub enum Error {
+    InvalidOperand,
+}
 
 enum EmitResult {
     FullyDetermined(Vec<u8>),
@@ -14,10 +25,33 @@ enum EmitResult {
     NoBytesRequired,
 }
 
+pub enum Target {
+    ZeroBytes,
+    OneByte(u8),
+    TwoByte(u16),
+}
+
+impl Target {
+    fn resolve_from(addressing_mode: &AddressingMode, _labels: &Labels) -> Option<Target> {
+        match addressing_mode {
+            AddressingMode::Immediate(_oe) => {}
+            AddressingMode::IndexedX(_oe) => {}
+            AddressingMode::IndexedY(_oe) => {}
+            AddressingMode::IndirectIndexedY(_oe) => {}
+            AddressingMode::IndexedIndirectX(_oe) => {}
+            AddressingMode::Indirect(_oe) => {}
+            AddressingMode::AbsoluteOrRelative(_oe) => {}
+            AddressingMode::NoOperand => {}
+        }
+
+        todo!()
+    }
+}
+
 #[derive(Debug)]
 struct GenerationState {
     program_counter: u16,
-    label_locations: HashMap<String, u16>,
+    label_locations: Labels,
 }
 
 impl Default for GenerationState {
@@ -82,47 +116,27 @@ fn emit_instruction(
     instruction: Instruction,
     generation_state: &mut GenerationState,
 ) -> Result<EmitResult, Error> {
-    match &instruction {
-        Instruction::StzAbsolute(ot) => {
-            let GenerationState {
-                program_counter,
-                label_locations,
-            } = generation_state;
-            let instruction_byte = instruction.instruction_byte();
-            match ot {
-                OperandExpression::Known(addr) => {
-                    known_16bit(instruction_byte, program_counter, *addr)
-                }
-                OperandExpression::Label(l) => match label_locations.get(l) {
-                    Some(addr) => known_16bit(instruction_byte, program_counter, *addr),
-                    None => {
-                        increment_pc(program_counter, 3);
-                        Ok(EmitResult::PartiallyUnknown(instruction))
-                    }
-                },
-            }
-        }
-        Instruction::JmpAbsolute(ot) => {
-            let GenerationState {
-                program_counter,
-                label_locations,
-            } = generation_state;
-            let instruction_byte = instruction.instruction_byte();
-            match ot {
-                OperandExpression::Known(addr) => {
-                    known_16bit(instruction_byte, program_counter, *addr)
-                }
-                OperandExpression::Label(l) => match label_locations.get(l) {
-                    Some(addr) => known_16bit(instruction_byte, program_counter, *addr),
-                    None => {
-                        increment_pc(program_counter, 3);
-                        Ok(EmitResult::PartiallyUnknown(instruction))
-                    }
-                },
-            }
-        }
-        Instruction::RtsStack => Ok(EmitResult::FullyDetermined(vec![0x60])),
-    }
+    let GenerationState {
+        program_counter,
+        label_locations,
+    } = generation_state;
+    let (result, size) = handle_instruction(&instruction, label_locations)?;
+    increment_pc(program_counter, size);
+    Ok(result)
+}
+
+fn handle_instruction(
+    instruction: &Instruction,
+    label_locations: &Labels,
+) -> Result<(EmitResult, u16), Error> {
+    let Instruction {
+        mnemonic,
+        addressing_mode,
+    } = instruction;
+    let target = Target::resolve_from(addressing_mode, label_locations);
+    let _result = lookup(mnemonic, &target.unwrap())?;
+
+    todo!()
 }
 
 fn increment_pc(program_counter: &mut u16, by: u16) {
@@ -130,20 +144,3 @@ fn increment_pc(program_counter: &mut u16, by: u16) {
         .checked_add(by)
         .expect("Program counter overflow")
 }
-
-fn known_16bit(
-    instruction_byte: u8,
-    program_counter: &mut u16,
-    val: u16,
-) -> Result<EmitResult, Error> {
-    let [l, h] = val.to_le_bytes();
-    let bytes = vec![instruction_byte, l, h];
-    increment_pc(program_counter, 3);
-    Ok(EmitResult::FullyDetermined(bytes))
-}
-
-// fn known_8bit(instruction_byte: u8, program_counter: &mut u16, val: u8) -> Result<EmitResult, Error> {
-//     let bytes = vec![instruction_byte, val];
-//     increment_pc(program_counter, 2);
-//     Ok(EmitResult::FullyDetermined(bytes))
-// }
