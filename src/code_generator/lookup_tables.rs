@@ -1,0 +1,86 @@
+use crate::code_generator::Error;
+use crate::parser::{AddressingMode, Mnemonic, Instruction};
+
+#[repr(u8)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub enum InstructionByte {
+    AdcAbsolute = 0x6D,
+    StzAbsolute = 0x9C,
+    RtsStack = 0x60,
+    JmpAbsolute = 0x4C,
+}
+
+pub fn lookup(
+    instruction: &Instruction
+) -> Result<(InstructionByte, Vec<u8>), Error> {
+    let Instruction {
+        mnemonic,
+        addressing_mode,
+    } = instruction;
+    match mnemonic {
+        Mnemonic::ADC => Err(Error::InvalidOperand),
+        Mnemonic::AND => Err(Error::InvalidOperand),
+        Mnemonic::ASL => Err(Error::InvalidOperand),
+        Mnemonic::BCC => Err(Error::InvalidOperand),
+        Mnemonic::BCS => Err(Error::InvalidOperand),
+        Mnemonic::BEQ => Err(Error::InvalidOperand),
+        Mnemonic::BIT => Err(Error::InvalidOperand),
+        Mnemonic::BMI => Err(Error::InvalidOperand),
+        Mnemonic::BNE => Err(Error::InvalidOperand),
+        Mnemonic::BPL => Err(Error::InvalidOperand),
+        Mnemonic::BRA => Err(Error::InvalidOperand),
+        Mnemonic::BRK => Err(Error::InvalidOperand),
+        Mnemonic::BVC => Err(Error::InvalidOperand),
+        Mnemonic::BVS => Err(Error::InvalidOperand),
+        Mnemonic::CLC => Err(Error::InvalidOperand),
+        Mnemonic::CLD => Err(Error::InvalidOperand),
+        Mnemonic::CLI => Err(Error::InvalidOperand),
+        Mnemonic::CLV => Err(Error::InvalidOperand),
+        Mnemonic::CMP => Err(Error::InvalidOperand),
+        Mnemonic::CPX => Err(Error::InvalidOperand),
+        Mnemonic::CPY => Err(Error::InvalidOperand),
+        Mnemonic::DEC => Err(Error::InvalidOperand),
+        Mnemonic::DEY => Err(Error::InvalidOperand),
+        Mnemonic::EOR => Err(Error::InvalidOperand),
+        Mnemonic::INC => Err(Error::InvalidOperand),
+        Mnemonic::INX => Err(Error::InvalidOperand),
+        Mnemonic::INY => Err(Error::InvalidOperand),
+        Mnemonic::JMP => Err(Error::InvalidOperand),
+        Mnemonic::JSR => Err(Error::InvalidOperand),
+        Mnemonic::LDA => Err(Error::InvalidOperand),
+        Mnemonic::LDX => Err(Error::InvalidOperand),
+        Mnemonic::LDY => Err(Error::InvalidOperand),
+        Mnemonic::LSR => Err(Error::InvalidOperand),
+        Mnemonic::NOP => Err(Error::InvalidOperand),
+        Mnemonic::ORA => Err(Error::InvalidOperand),
+        Mnemonic::PHA => Err(Error::InvalidOperand),
+        Mnemonic::PHP => Err(Error::InvalidOperand),
+        Mnemonic::PHX => Err(Error::InvalidOperand),
+        Mnemonic::PHY => Err(Error::InvalidOperand),
+        Mnemonic::PLA => Err(Error::InvalidOperand),
+        Mnemonic::PLP => Err(Error::InvalidOperand),
+        Mnemonic::PLX => Err(Error::InvalidOperand),
+        Mnemonic::PLY => Err(Error::InvalidOperand),
+        Mnemonic::ROL => Err(Error::InvalidOperand),
+        Mnemonic::ROR => Err(Error::InvalidOperand),
+        Mnemonic::RTI => Err(Error::InvalidOperand),
+        Mnemonic::RTS => Err(Error::InvalidOperand),
+        Mnemonic::SBC => Err(Error::InvalidOperand),
+        Mnemonic::SEC => Err(Error::InvalidOperand),
+        Mnemonic::SED => Err(Error::InvalidOperand),
+        Mnemonic::SEI => Err(Error::InvalidOperand),
+        Mnemonic::STA => Err(Error::InvalidOperand),
+        Mnemonic::STP => Err(Error::InvalidOperand),
+        Mnemonic::STX => Err(Error::InvalidOperand),
+        Mnemonic::STY => Err(Error::InvalidOperand),
+        Mnemonic::STZ => Err(Error::InvalidOperand),
+        Mnemonic::TAX => Err(Error::InvalidOperand),
+        Mnemonic::TAY => Err(Error::InvalidOperand),
+        Mnemonic::TRB => Err(Error::InvalidOperand),
+        Mnemonic::TSB => Err(Error::InvalidOperand),
+        Mnemonic::TSX => Err(Error::InvalidOperand),
+        Mnemonic::TXA => Err(Error::InvalidOperand),
+        Mnemonic::TYA => Err(Error::InvalidOperand),
+        Mnemonic::WAI => Err(Error::InvalidOperand),
+    }
+}

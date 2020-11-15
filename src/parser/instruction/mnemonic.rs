@@ -18,11 +18,74 @@ impl<'a> FromExternalError<Input<'a>, UndefinedMnemonic> for Error<Input<'a>> {
     }
 }
 
+// TODO: BBR/BBS has special addressing mode! "BBR0 zp,rel" or "BBR 0,zp,rel"?
+// TODO: RMB/SMB could maybe use special addressing mode?
 #[derive(Debug, Eq, PartialEq, strum_macros::EnumString, strum_macros::Display)]
 pub enum Mnemonic {
-    STZ,
-    RTS,
+    ADC,
+    AND,
+    ASL,
+    BCC,
+    BCS,
+    BEQ,
+    BIT,
+    BMI,
+    BNE,
+    BPL,
+    BRA,
+    BRK,
+    BVC,
+    BVS,
+    CLC,
+    CLD,
+    CLI,
+    CLV,
+    CMP,
+    CPX,
+    CPY,
+    DEC,
+    DEY,
+    EOR,
+    INC,
+    INX,
+    INY,
     JMP,
+    JSR,
+    LDA,
+    LDX,
+    LDY,
+    LSR,
+    NOP,
+    ORA,
+    PHA,
+    PHP,
+    PHX,
+    PHY,
+    PLA,
+    PLP,
+    PLX,
+    PLY,
+    ROL,
+    ROR,
+    RTI,
+    RTS,
+    SBC,
+    SEC,
+    SED,
+    SEI,
+    STA,
+    STP,
+    STX,
+    STY,
+    STZ,
+    TAX,
+    TAY,
+    TRB,
+    TSB,
+    TSX,
+    TXA,
+    TYA,
+    WAI,
 }
 
 impl Mnemonic {
@@ -56,7 +119,7 @@ mod tests {
 
     #[test]
     fn mnemonic_fail_2() {
-        let input = "STA #$0300";
+        let input = "SAX #$0300";
         let result = Mnemonic::parse(input);
         assert!(result.is_err())
     }
